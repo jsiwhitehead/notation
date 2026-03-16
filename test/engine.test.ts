@@ -8,7 +8,7 @@ function getSegment(input: PieceInput) {
 }
 
 describe("runEngine", () => {
-  test("derives structure from event evidence without a hint", () => {
+  test("derives structure from event evidence without harmonic guidance", () => {
     const segment = getSegment({
       segments: [
         {
@@ -20,38 +20,38 @@ describe("runEngine", () => {
       ],
     });
 
-    expect(segment.core).toEqual([0, 4, 7]);
+    expect(segment.center).toEqual([0, 4, 7]);
   });
 
-  test("derives structure from hint evidence when no events are present", () => {
+  test("derives structure from guidance evidence when no events are present", () => {
     const segment = getSegment({
       segments: [
         {
           events: [],
-          harmonyHint: "Cmaj7",
+          harmonicGuidance: "Cmaj7",
         },
       ],
     });
 
-    expect(segment.core).toEqual([0, 4, 7, 11]);
+    expect(segment.center).toEqual([0, 4, 7, 11]);
     expect(segment.regions).toHaveLength(3);
     expect(
       segment.regions.flatMap((region) => [region.start, region.end]),
     ).toEqual(expect.arrayContaining([0, 4, 7, 11]));
-    expect(segment.grounding).toEqual({ root: 0, base: 0 });
+    expect(segment.grounding).toEqual({ ground: 0, root: 0 });
   });
 
-  test("prefers sounded event evidence when hint and events disagree", () => {
+  test("prefers sounded event evidence when guidance and events disagree", () => {
     const segment = getSegment({
       segments: [
         {
           events: [{ duration: 1, pitches: [60, 64, 67], type: "chord" }],
-          harmonyHint: "Dmin7",
+          harmonicGuidance: "Dmin7",
         },
       ],
     });
 
-    expect(segment.core).toEqual([0, 4, 7]);
+    expect(segment.center).toEqual([0, 4, 7]);
   });
 
   test("derives regions from event evidence when events are present", () => {
@@ -62,7 +62,7 @@ describe("runEngine", () => {
             { duration: 1, pitch: 60, type: "note" },
             { duration: 1, pitch: 66, type: "note" },
           ],
-          harmonyHint: "Cmaj7",
+          harmonicGuidance: "Cmaj7",
         },
       ],
     });
@@ -73,7 +73,7 @@ describe("runEngine", () => {
     ]);
   });
 
-  test("uses overlapping evidence when hint and events agree", () => {
+  test("uses overlapping evidence when guidance and events agree", () => {
     const segment = getSegment({
       segments: [
         {
@@ -81,16 +81,16 @@ describe("runEngine", () => {
             { duration: 1, pitch: 62, type: "note" },
             { duration: 1, pitches: [65, 69], type: "chord" },
           ],
-          harmonyHint: "Dmin7/A",
+          harmonicGuidance: "Dmin7/A",
         },
       ],
     });
 
-    expect(segment.core).toEqual([2, 5, 9]);
-    expect(segment.grounding).toEqual({ root: 2, base: 9 });
+    expect(segment.center).toEqual([2, 5, 9]);
+    expect(segment.grounding).toEqual({ ground: 9, root: 2 });
   });
 
-  test("falls back to simple region grounding for weak unhinted evidence", () => {
+  test("falls back to simple region grounding for weak unguided evidence", () => {
     const segment = getSegment({
       segments: [
         {
@@ -106,7 +106,7 @@ describe("runEngine", () => {
       { end: 0, start: 0 },
       { end: 6, start: 6 },
     ]);
-    expect(segment.grounding).toEqual({ root: 0, base: 6 });
+    expect(segment.grounding).toEqual({ ground: 6, root: 0 });
   });
 
   test("emits only non-wrapping regions", () => {
@@ -114,7 +114,7 @@ describe("runEngine", () => {
       segments: [
         {
           events: [],
-          harmonyHint: "Bsus4",
+          harmonicGuidance: "Bsus4",
         },
       ],
     });

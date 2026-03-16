@@ -1,7 +1,7 @@
 import type { PitchClass } from "./model";
 
-export type ParsedHarmonyHint = {
-  bassPitchClass: PitchClass;
+export type ParsedHarmonicGuidance = {
+  groundPitchClass: PitchClass;
   pitchClasses: PitchClass[];
   rootPitchClass: PitchClass;
 };
@@ -293,7 +293,9 @@ function applyAlterations(
   return intervals;
 }
 
-function getHintPitchClasses(parsedSymbol: ParsedHarmonySymbol): PitchClass[] {
+function getGuidancePitchClasses(
+  parsedSymbol: ParsedHarmonySymbol,
+): PitchClass[] {
   const baseIntervals = getBaseIntervals(parsedSymbol.quality);
   const withExtensions = applyExtensions(baseIntervals, parsedSymbol);
   const completeIntervals = applyAlterations(withExtensions, parsedSymbol);
@@ -305,9 +307,9 @@ function getHintPitchClasses(parsedSymbol: ParsedHarmonySymbol): PitchClass[] {
   );
 }
 
-export function normalizeHarmonyHint(
+export function normalizeHarmonicGuidance(
   symbol: string,
-): ParsedHarmonyHint | undefined {
+): ParsedHarmonicGuidance | undefined {
   const parsedSymbol = parseHarmonySymbol(symbol);
 
   if (parsedSymbol === undefined) {
@@ -315,14 +317,14 @@ export function normalizeHarmonyHint(
   }
 
   const rootPitchClass = getRootFromName(parsedSymbol.rootName);
-  const bassPitchClass =
+  const groundPitchClass =
     parsedSymbol.bassName === undefined
       ? rootPitchClass
       : getRootFromName(parsedSymbol.bassName);
 
   return {
-    bassPitchClass,
-    pitchClasses: getHintPitchClasses(parsedSymbol),
+    groundPitchClass,
+    pitchClasses: getGuidancePitchClasses(parsedSymbol),
     rootPitchClass,
   };
 }

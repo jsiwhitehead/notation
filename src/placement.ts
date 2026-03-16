@@ -1,4 +1,4 @@
-import type { Grounding, HarmonicOutput } from "./engine";
+import type { Grounding, HarmonicStructure } from "./engine";
 import type { EventOffset, HarmonicRegion, PieceInput } from "./model";
 
 const STAFF_PADDING = 1;
@@ -18,7 +18,7 @@ export type PositionedEvent =
     };
 
 export type PositionedSegment = {
-  corePitchClasses: number[];
+  centerPitchClasses: number[];
   grounding: Grounding | undefined;
   index: number;
   positionedEvents: PositionedEvent[];
@@ -105,7 +105,7 @@ function buildPlacedEvents(
 
 export function buildPlacement(
   input: PieceInput,
-  harmonicOutput: HarmonicOutput,
+  harmonicStructure: HarmonicStructure,
 ): Placement {
   const pitchRange = getPitchRange(input);
   const middlePitch = Math.round((pitchRange.max + pitchRange.min) / 2);
@@ -114,11 +114,11 @@ export function buildPlacement(
     maxPitch: pitchRange.max,
     minPitch: pitchRange.min,
     segments: input.segments.map((segment, index) => {
-      const harmonicSegment = harmonicOutput.segments[index]!;
+      const harmonicSegment = harmonicStructure.segments[index]!;
       const placedEvents = buildPlacedEvents(segment, middlePitch);
 
       return {
-        corePitchClasses: harmonicSegment.core,
+        centerPitchClasses: harmonicSegment.center,
         grounding: harmonicSegment.grounding,
         index,
         positionedEvents: placedEvents.positionedEvents,

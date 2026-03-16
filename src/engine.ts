@@ -1,4 +1,4 @@
-import { normalizeHarmonyHint } from "./chord";
+import { normalizeHarmonicGuidance } from "./chord";
 
 import type {
   EventInput,
@@ -17,25 +17,25 @@ function uniqueSortedPitchClasses(values: PitchClass[]): PitchClass[] {
 }
 
 export type Grounding = {
+  ground: PitchClass;
   root: PitchClass;
-  base: PitchClass;
 };
 
 export type HarmonicSegment = {
-  core: PitchClass[];
+  center: PitchClass[];
   grounding?: Grounding;
   regions: HarmonicRegion[];
 };
 
-export type HarmonicOutput = {
+export type HarmonicStructure = {
   segments: HarmonicSegment[];
 };
 
 type SegmentEvidence = {
   eventPitchClasses: PitchClass[];
-  hintPitchClasses: PitchClass[];
-  hintRootPitchClass?: PitchClass;
-  hintBassPitchClass?: PitchClass;
+  guidancePitchClasses: PitchClass[];
+  guidanceGroundPitchClass?: PitchClass;
+  guidanceRootPitchClass?: PitchClass;
 };
 
 function getEventPitchClasses(event: EventInput): PitchClass[] {
@@ -142,36 +142,36 @@ function countOverlap(left: PitchClass[], right: PitchClass[]): number {
 }
 
 function collectSegmentEvidence(segment: SegmentInput): SegmentEvidence {
-  const normalizedHint =
-    segment.harmonyHint === undefined
+  const normalizedGuidance =
+    segment.harmonicGuidance === undefined
       ? undefined
-      : normalizeHarmonyHint(segment.harmonyHint);
+      : normalizeHarmonicGuidance(segment.harmonicGuidance);
 
   return {
     eventPitchClasses: uniqueSortedPitchClasses(
       segment.events.flatMap(getEventPitchClasses),
     ),
-    hintPitchClasses: normalizedHint?.pitchClasses ?? [],
-    ...(normalizedHint === undefined
+    guidancePitchClasses: normalizedGuidance?.pitchClasses ?? [],
+    ...(normalizedGuidance === undefined
       ? {}
       : {
-          hintBassPitchClass: normalizedHint.bassPitchClass,
-          hintRootPitchClass: normalizedHint.rootPitchClass,
+          guidanceGroundPitchClass: normalizedGuidance.groundPitchClass,
+          guidanceRootPitchClass: normalizedGuidance.rootPitchClass,
         }),
   };
 }
 
-function buildCore(
+function buildCenter(
   eventEvidence: PitchClass[],
-  hintEvidence: PitchClass[],
+  guidanceEvidence: PitchClass[],
   regions: HarmonicRegion[],
 ): PitchClass[] {
-  if (eventEvidence.length === 0 && hintEvidence.length === 0) {
+  if (eventEvidence.length === 0 && guidanceEvidence.length === 0) {
     return [];
   }
 
-  const eventHintOverlap = eventEvidence.filter((pitch) =>
-    hintEvidence.includes(pitch),
+  const eventGuidanceOverlap = eventEvidence.filter((pitch) =>
+    guidanceEvidence.includes(pitch),
   );
   const boundaryNotes = uniqueSortedPitchClasses(
     regions.flatMap((region) => [region.start, region.end]),
@@ -179,12 +179,12 @@ function buildCore(
   const eventBoundaryNotes = boundaryNotes.filter((pitch) =>
     eventEvidence.includes(pitch),
   );
-  const hintedBoundaryNotes = boundaryNotes.filter((pitch) =>
-    hintEvidence.includes(pitch),
+  const guidedBoundaryNotes = boundaryNotes.filter((pitch) =>
+    guidanceEvidence.includes(pitch),
   );
 
-  if (eventHintOverlap.length >= 2) {
-    return eventHintOverlap;
+  if (eventGuidanceOverlap.length >= 2) {
+    return eventGuidanceOverlap;
   }
 
   if (eventBoundaryNotes.length >= 2) {
@@ -195,76 +195,82 @@ function buildCore(
     return eventEvidence.length <= 3 ? eventEvidence : eventBoundaryNotes;
   }
 
-  if (hintedBoundaryNotes.length >= 2) {
-    return hintedBoundaryNotes;
+  if (guidedBoundaryNotes.length >= 2) {
+    return guidedBoundaryNotes;
   }
 
-  return hintEvidence.length <= 3 ? hintEvidence : hintedBoundaryNotes;
+  return guidanceEvidence.length <= 3 ? guidanceEvidence : guidedBoundaryNotes;
 }
 
 function getGrounding(
-  core: PitchClass[],
+  center: PitchClass[],
   segmentEvidence: SegmentEvidence,
   regions: HarmonicRegion[],
 ): Grounding | undefined {
-  const { hintBassPitchClass, hintPitchClasses, hintRootPitchClass } =
-    segmentEvidence;
+  const {
+    guidancePitchClasses,
+    guidanceGroundPitchClass,
+    guidanceRootPitchClass,
+  } = segmentEvidence;
 
-  if (hintPitchClasses.length < 3) {
+  if (guidancePitchClasses.length < 3) {
     if (regions.length === 2) {
       return {
+        ground: regions[1]!.start,
         root: regions[0]!.start,
-        base: regions[1]!.start,
       };
     }
 
     return undefined;
   }
 
-  if (countOverlap(core, hintPitchClasses) < 2) {
+  if (countOverlap(center, guidancePitchClasses) < 2) {
     return regions.length === 2
       ? {
+          ground: regions[1]!.start,
           root: regions[0]!.start,
-          base: regions[1]!.start,
         }
       : undefined;
   }
 
-  if (hintRootPitchClass === undefined || hintBassPitchClass === undefined) {
+  if (
+    guidanceRootPitchClass === undefined ||
+    guidanceGroundPitchClass === undefined
+  ) {
     return undefined;
   }
 
   return {
-    root: hintRootPitchClass,
-    base: hintBassPitchClass,
+    ground: guidanceGroundPitchClass,
+    root: guidanceRootPitchClass,
   };
 }
 
 function getRegionEvidence(segmentEvidence: SegmentEvidence): PitchClass[] {
   return segmentEvidence.eventPitchClasses.length > 0
     ? segmentEvidence.eventPitchClasses
-    : segmentEvidence.hintPitchClasses;
+    : segmentEvidence.guidancePitchClasses;
 }
 
 function analyzeSegment(segment: SegmentInput): HarmonicSegment {
   const segmentEvidence = collectSegmentEvidence(segment);
   const regionEvidence = getRegionEvidence(segmentEvidence);
   const regions = buildRegions(regionEvidence);
-  const core = buildCore(
+  const center = buildCenter(
     segmentEvidence.eventPitchClasses,
-    segmentEvidence.hintPitchClasses,
+    segmentEvidence.guidancePitchClasses,
     regions,
   );
-  const grounding = getGrounding(core, segmentEvidence, regions);
+  const grounding = getGrounding(center, segmentEvidence, regions);
 
   return {
-    core,
+    center,
     ...(grounding === undefined ? {} : { grounding }),
     regions,
   };
 }
 
-export function runEngine(input: PieceInput): HarmonicOutput {
+export function runEngine(input: PieceInput): HarmonicStructure {
   return {
     segments: input.segments.map(analyzeSegment),
   };

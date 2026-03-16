@@ -134,7 +134,7 @@ function appendRegionBlock(
   group.append(rect);
 }
 
-function appendCoreMark(
+function appendCenterMark(
   group: SVGGElement,
   maxPitch: number,
   segmentX: number,
@@ -159,7 +159,7 @@ function appendGroundingMark(
   group: SVGGElement,
   maxPitch: number,
   segmentX: number,
-  groundingMark: { pitch: number; type: "base" | "root" },
+  groundingMark: { pitch: number; type: "ground" | "root" },
 ): void {
   const line = createSvgElement("line");
   const y = getYForPitch(maxPitch, groundingMark.pitch);
@@ -233,7 +233,7 @@ function appendNote(
 function buildGroundingMarks(
   placement: Placement,
   positionedSegment: PositionedSegment,
-): { pitch: number; type: "base" | "root" }[] {
+): { pitch: number; type: "ground" | "root" }[] {
   if (positionedSegment.grounding === undefined) {
     return [];
   }
@@ -246,16 +246,16 @@ function buildGroundingMarks(
     pitch,
     type: "root" as const,
   }));
-  const baseMarks = repeatPitchClassesAcrossRange(
+  const groundMarks = repeatPitchClassesAcrossRange(
     placement.maxPitch,
     placement.minPitch,
-    [positionedSegment.grounding.base],
+    [positionedSegment.grounding.ground],
   ).map((pitch) => ({
     pitch,
-    type: "base" as const,
+    type: "ground" as const,
   }));
 
-  return [...rootMarks, ...baseMarks].sort(
+  return [...rootMarks, ...groundMarks].sort(
     (left, right) => left.pitch - right.pitch,
   );
 }
@@ -320,9 +320,9 @@ function appendSegment(
   repeatPitchClassesAcrossRange(
     maxPitch,
     minPitch,
-    positionedSegment.corePitchClasses,
+    positionedSegment.centerPitchClasses,
   ).forEach((pitch) => {
-    appendCoreMark(group, maxPitch, segmentX, pitch);
+    appendCenterMark(group, maxPitch, segmentX, pitch);
   });
 
   buildGroundingMarks(placement, positionedSegment).forEach((groundingMark) => {

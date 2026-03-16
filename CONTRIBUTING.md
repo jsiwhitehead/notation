@@ -80,6 +80,20 @@ PR checklist:
   - link to authoritative docs instead of duplicating specs
   - if something is a technical must or must-not contract, it belongs in `docs/architecture.md`
 
+## Canonical vocabulary
+
+Canonical domain terms SHOULD be used consistently across code and documentation. Avoid inventing synonyms for the following concepts:
+
+- authored input, harmonic guidance, canonical input
+- piece, segment, event
+- note, chord, rest
+- duration, layer, offset
+- pitch, pitch class, pitch range
+- harmonic engine, harmonic evidence, harmonic structure
+- region, center, grounding, root, ground
+- placement
+- rendering
+
 ## Change hygiene
 
 - Do not mix functional changes with unrelated refactors.

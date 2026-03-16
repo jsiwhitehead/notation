@@ -7,21 +7,21 @@ export const SEED_INPUT: PieceInput = {
         { duration: 1, pitch: 60, type: "note" },
         { duration: 2, pitches: [64, 67], type: "chord" },
       ],
-      harmonyHint: "Cmaj",
+      harmonicGuidance: "Cmaj",
     },
     {
       events: [
         { duration: 1, pitch: 62, type: "note" },
         { duration: 2, pitches: [65, 69], type: "chord" },
       ],
-      harmonyHint: "Dmin7/A",
+      harmonicGuidance: "Dmin7/A",
     },
     {
       events: [
         { duration: 1, type: "rest" },
         { duration: 2, pitches: [67, 71, 74], type: "chord" },
       ],
-      harmonyHint: "Gsus4",
+      harmonicGuidance: "Gsus4",
     },
   ],
 };

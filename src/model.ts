@@ -1,7 +1,7 @@
 export type PitchClass = number;
 export type EventLayer = number;
 export type EventOffset = number;
-export type HarmonyHint = string;
+export type HarmonicGuidance = string;
 
 type BaseEvent = {
   duration: number;
@@ -27,7 +27,7 @@ export type EventInput = ChordEvent | NoteEvent | RestEvent;
 
 export type SegmentInput = {
   events: EventInput[];
-  harmonyHint?: HarmonyHint;
+  harmonicGuidance?: HarmonicGuidance;
 };
 
 export type PieceInput = {

@@ -10,8 +10,8 @@ function main(): void {
     throw new Error("Missing #root element.");
   }
 
-  const harmonicOutput = runEngine(SEED_INPUT);
-  const placement = buildPlacement(SEED_INPUT, harmonicOutput);
+  const harmonicStructure = runEngine(SEED_INPUT);
+  const placement = buildPlacement(SEED_INPUT, harmonicStructure);
   const app = renderApp(placement);
 
   root.replaceChildren();

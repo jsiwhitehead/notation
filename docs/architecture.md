@@ -2,27 +2,40 @@
 
 This document captures the highest-level architecture of the system and the boundaries between its main stages.
 
-The system is organized as a simple staged pipeline:
+## Foundational musical orientation
 
-1. musical material is authored in some input form
-2. that material is normalized into the canonical input model
-3. the harmonic engine settles canonical harmonic structure from that input
-4. the rendering stage places event material into that harmonic structure and projects the resulting musical object visibly
+This system is built on a small set of musical commitments that shape the whole architecture:
 
-The architecture is built around three distinct concerns:
+- harmonic structure is treated as relational and spatial, not reduced to a single chord symbol
+- pitch-class evidence is primary
+- fifth-relations matter structurally
+- harmonic guidance contributes evidence without replacing sounded evidence
+- harmonic structure may sometimes be completed conservatively when the evidence strongly implies missing support
+- local harmonic settlement is meaningful even before larger tonal context is resolved
 
-- authored input, which may vary in surface form but must normalize into the canonical input model
-- harmonic analysis, which derives canonical harmonic structure from authored musical facts
-- placement and rendering, which turn authored event material plus harmonic structure into visible output
+## Architectural boundaries
 
 The main architectural boundaries are:
 
-- authored input remains separate from derived harmonic structure
-- harmonic analysis remains separate from placement and projection
+- authored input remains separate from harmonic structure
+- harmonic engine remains separate from placement and rendering
 - placement remains separate from rendering
 
-Detailed specifications live in the focused docs for each part of the system:
+## Staged pipeline
 
-- [authoring.md](/Users/jon/Sites/notation/docs/authoring.md): authored-input approaches and the normalization boundary
-- [engine.md](/Users/jon/Sites/notation/docs/engine.md): canonical harmonic-engine input, output, principles, and current process
-- [render.md](/Users/jon/Sites/notation/docs/render.md): placement and rendering principles, current approach, and open areas
+The system is organized as a simple staged pipeline:
+
+1. authored input is provided in some input form
+2. authored input is normalized into the canonical input
+3. the harmonic engine derives harmonic structure from the canonical input
+4. placement combines canonical input and harmonic structure
+5. rendering renders the result of placement
+
+## Related docs
+
+Detailed specifications live in the focused docs:
+
+- `docs/authoring.md`: authored-input approaches and the normalization boundary
+- `docs/engine.md`: canonical harmonic-engine input, output, principles, and current process
+- `docs/render.md`: placement and rendering principles and current approach
+- `ROADMAP.md`: forward-looking work, sequencing, and open directions

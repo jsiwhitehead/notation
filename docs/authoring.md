@@ -1,40 +1,32 @@
 # Authoring
 
-This document defines the authored-input side of the system: the main authored forms explored so far, the kinds of guidance they may contain, and the rule that they must normalize into the canonical input model used by the harmonic engine.
+This document defines the authored-input side of the system as it exists in this repository: the normalization boundary and the kinds of authored guidance that belong on the authored side of that boundary.
 
 ## Architectural rule
 
-The authored input language remains open so long as it can be normalized into the canonical input model consumed by the harmonic engine.
+The authored input language remains open so long as it normalizes into the canonical input consumed by the harmonic engine.
 
-`engine.md` is authoritative for the current canonical input contract consumed by the engine.
+`docs/engine.md` is authoritative for the current canonical input contract consumed by the engine.
 
-In the current repository, authored material is represented directly in that canonical model. Richer authored forms remain open so long as they normalize into the same contract.
+In the current repository, authored input is represented directly in canonical-input form. Richer authored forms remain open so long as they normalize into the same contract.
 
-## Authored input approaches
+## Overview of authored input approaches
 
-Previous iterations explored several authored input approaches above the same canonical input model.
+Earlier codebases explored three broad authored-input approaches above the same normalization boundary.
 
-One approach used a compact symbolic score language. A piece is entered as a sequence of usually bar-like segments, each with optional harmonic labeling followed by authored events. Single notes, grouped simultaneous notes, and explicit gaps are entered textually, with octave marked lightly rather than through full absolute pitch notation.
+- text-first input, where a compact symbolic score language describes segment-like spans, harmonic guidance, notes, simultaneities, rests, and light octave marking
+- structure-first input, where direct objects or arrays describe segments, events, durations, notes, rests, and optional harmonic guidance
+- evidence-first input, where recent note material over time is treated as the starting point for local harmonic settlement
 
-Another approach used direct structured data. The piece is already written as arrays or objects containing bars or segments, one or more lines of event material, durations, notes, rests, and optional harmonic hints. Some variants also included presentational conveniences such as pre-authored harmonic block hints.
-
-A third approach used rolling note-stream input. The system receives recent note material over time and infers a sequence of local musical states from that stream. This is the sparsest authored form and shows that harmonic unification can begin from recent musical evidence alone.
-
-Taken together, the archived codebases explored three broad authored styles:
-
-- text-first input
-- structure-first input
-- evidence-first input
+All three fit the same architectural rule so long as they normalize into the canonical input consumed by the harmonic engine.
 
 ## Authored guidance
 
-The earlier codebases also explored different balances of authored guidance.
+Authored input might contain:
 
-Inputs might contain:
-
-- event material only
-- event material plus harmonic hints
+- events only
+- events plus harmonic guidance
 - stronger structural aids such as authored block cues
 - piece-level metadata such as coarse time-grid declarations, height hints, or global bias flags
 
-These are all authored guidance rather than derived harmonic structure.
+These are all authored guidance rather than harmonic structure.
