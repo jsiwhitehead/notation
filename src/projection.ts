@@ -3,6 +3,7 @@ import type {
   Grounding,
   HarmonicRegion,
   HarmonicStructure,
+  PitchClass,
   PieceInput,
 } from "./model";
 import { getEventPitches, repeatPitchClassesAcrossRange } from "./pitch";
@@ -41,15 +42,14 @@ export type ProjectionEvent =
       type: "rest";
     };
 
-export type ProjectionPlacement = {
+type ProjectionPlacement = {
   center: ProjectedRegion;
   field: ProjectedRegion;
-  groundingMarks: GroundingMark[];
+  groundingOverlay: ProjectedGroundingOverlay | undefined;
   restPitch: number;
-  visibleWindow: PitchWindow;
 };
 
-export type ProjectionHarmonic = {
+type ProjectionHarmonic = {
   center: HarmonicRegion;
   field: HarmonicRegion;
   grounding: Grounding | undefined;
@@ -69,9 +69,15 @@ export type Projection = {
   segments: ProjectionSegment[];
 };
 
-export type GroundingMark = {
+type ProjectedGroundingMark = {
   pitch: number;
   type: "ground" | "root";
+};
+
+type ProjectedGroundingOverlay = {
+  marks: ProjectedGroundingMark[];
+  groundPitchClass: PitchClass;
+  rootPitchClass: PitchClass;
 };
 
 export function buildProjection(
@@ -79,22 +85,13 @@ export function buildProjection(
   harmonicStructure: HarmonicStructure,
 ): Projection {
   const visibleWindow = getPaddedPieceWindow(getPitchWindow(input));
-  const projectedCenters = buildLinkedProjectedRegions(
-    harmonicStructure.segments.map((segment) => segment.center),
-    visibleWindow,
-  );
-  const projectedFields = buildLinkedProjectedRegions(
-    harmonicStructure.segments.map((segment) => segment.field),
+  const projectedPlacements = buildProjectedPlacements(
+    harmonicStructure,
     visibleWindow,
   );
   const segments: ProjectionSegment[] = input.segments.map((segment, index) => {
     const harmonicSegment = harmonicStructure.segments[index]!;
-    const placement = buildProjectionPlacement(
-      harmonicSegment,
-      projectedCenters[index]!,
-      projectedFields[index]!,
-      visibleWindow,
-    );
+    const placement = projectedPlacements[index]!;
     const events = buildProjectionEvents(segment, placement.restPitch);
 
     return {
@@ -117,6 +114,34 @@ export function buildProjection(
   };
 }
 
+function buildProjectedPlacements(
+  harmonicStructure: HarmonicStructure,
+  visibleWindow: PitchWindow,
+): ProjectionPlacement[] {
+  const projectedCenters = buildLinkedProjectedRegions(
+    harmonicStructure.segments.map((segment) => segment.center),
+    visibleWindow,
+  );
+  const projectedFields = buildLinkedProjectedRegions(
+    harmonicStructure.segments.map((segment) => segment.field),
+    visibleWindow,
+  );
+  const projectedGroundingOverlays = buildProjectedGroundingOverlays(
+    harmonicStructure,
+    projectedCenters,
+    projectedFields,
+  );
+
+  return harmonicStructure.segments.map((_, index) => ({
+    center: projectedCenters[index]!,
+    field: projectedFields[index]!,
+    groundingOverlay: projectedGroundingOverlays[index],
+    restPitch: Math.round(
+      (visibleWindow.maxPitch + visibleWindow.minPitch) / 2,
+    ),
+  }));
+}
+
 function getPitchWindow(input: PieceInput): PitchWindow {
   return (
     getPaddedPitchWindow(
@@ -134,25 +159,20 @@ function getPaddedPieceWindow(window: PitchWindow): PitchWindow {
   };
 }
 
-function buildProjectionPlacement(
-  harmonicSegment: HarmonicStructure["segments"][number],
-  projectedCenter: ProjectedRegion,
-  projectedField: ProjectedRegion,
-  visibleWindow: PitchWindow,
-): ProjectionPlacement {
-  return {
-    center: projectedCenter,
-    field: projectedField,
-    groundingMarks: getGroundingMarksForRange(
-      visibleWindow.maxPitch,
-      visibleWindow.minPitch,
-      harmonicSegment.grounding,
+export function buildProjectedGroundingOverlays(
+  harmonicStructure: HarmonicStructure,
+  projectedCenters: ProjectedRegion[],
+  projectedFields: ProjectedRegion[],
+): (ProjectedGroundingOverlay | undefined)[] {
+  return harmonicStructure.segments.map((segment, index) =>
+    buildProjectedGroundingOverlay(
+      segment.grounding,
+      getProjectedGroundingWindow(
+        projectedCenters[index]!,
+        projectedFields[index]!,
+      ),
     ),
-    restPitch: Math.round(
-      (visibleWindow.maxPitch + visibleWindow.minPitch) / 2,
-    ),
-    visibleWindow,
-  };
+  );
 }
 
 function getPaddedPitchWindow(pitches: number[]): PitchWindow | undefined {
@@ -166,31 +186,61 @@ function getPaddedPitchWindow(pitches: number[]): PitchWindow | undefined {
   };
 }
 
-function getGroundingMarksForRange(
-  maxPitch: number,
-  minPitch: number,
+function buildProjectedGroundingOverlay(
   grounding: Grounding | undefined,
-): GroundingMark[] {
-  if (grounding === undefined) {
-    return [];
+  projectedGroundingWindow: PitchWindow | undefined,
+): ProjectedGroundingOverlay | undefined {
+  if (grounding === undefined || projectedGroundingWindow === undefined) {
+    return undefined;
   }
 
-  const rootMarks = repeatPitchClassesAcrossRange(maxPitch, minPitch, [
-    grounding.root,
-  ]).map((pitch) => ({
-    pitch,
-    type: "root" as const,
-  }));
-  const groundMarks = repeatPitchClassesAcrossRange(maxPitch, minPitch, [
-    grounding.ground,
-  ]).map((pitch) => ({
-    pitch,
-    type: "ground" as const,
-  }));
+  return {
+    marks: [
+      ...buildProjectedGroundingMarks(
+        projectedGroundingWindow,
+        grounding.root,
+        "root",
+      ),
+      ...buildProjectedGroundingMarks(
+        projectedGroundingWindow,
+        grounding.ground,
+        "ground",
+      ),
+    ].sort((left, right) => left.pitch - right.pitch),
+    groundPitchClass: grounding.ground,
+    rootPitchClass: grounding.root,
+  };
+}
 
-  return [...rootMarks, ...groundMarks].sort(
-    (left, right) => left.pitch - right.pitch,
-  );
+function buildProjectedGroundingMarks(
+  projectedGroundingWindow: PitchWindow,
+  pitchClass: PitchClass,
+  type: ProjectedGroundingMark["type"],
+): ProjectedGroundingMark[] {
+  return repeatPitchClassesAcrossRange(
+    projectedGroundingWindow.maxPitch,
+    projectedGroundingWindow.minPitch,
+    [pitchClass],
+  ).map((pitch) => ({
+    pitch,
+    type,
+  }));
+}
+
+function getProjectedGroundingWindow(
+  projectedCenter: ProjectedRegion,
+  projectedField: ProjectedRegion,
+): PitchWindow | undefined {
+  const projectedSpans = [...projectedCenter.spans, ...projectedField.spans];
+
+  if (projectedSpans.length === 0) {
+    return undefined;
+  }
+
+  return {
+    maxPitch: Math.max(...projectedSpans.map((span) => span.end)),
+    minPitch: Math.min(...projectedSpans.map((span) => span.start)),
+  };
 }
 
 function buildProjectionEvents(

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { runEngine } from "../src/engine";
 import {
+  buildProjectedGroundingOverlays,
   buildRegionSpanClasses,
   buildProjection,
   repeatRegionSpanClassesAcrossRange,
@@ -49,7 +50,7 @@ describe("projection", () => {
     expect(repeatPitchClassesAcrossRange(14, 0, [0, 7])).toEqual([0, 7, 12]);
   });
 
-  test("buildProjection placement repeats root and ground across the visible range", () => {
+  test("buildProjection placement repeats root and ground marks across the visible range", () => {
     const projection = buildProjection(
       {
         segments: [
@@ -69,10 +70,14 @@ describe("projection", () => {
       },
     );
 
-    expect(projection.segments[0]?.placement.groundingMarks).toEqual([
-      { pitch: 60, type: "root" },
-      { pitch: 67, type: "ground" },
-    ]);
+    expect(projection.segments[0]?.placement.groundingOverlay).toEqual({
+      marks: [
+        { pitch: 60, type: "root" },
+        { pitch: 67, type: "ground" },
+      ],
+      groundPitchClass: 7,
+      rootPitchClass: 0,
+    });
   });
 
   test("buildProjection emits render-ready harmonic placement data", () => {
@@ -118,15 +123,15 @@ describe("projection", () => {
             { end: 67, start: 67 },
           ],
         },
-        groundingMarks: [
-          { pitch: 60, type: "root" },
-          { pitch: 67, type: "ground" },
-        ],
-        restPitch: 64,
-        visibleWindow: {
-          maxPitch: 69,
-          minPitch: 58,
+        groundingOverlay: {
+          marks: [
+            { pitch: 60, type: "root" },
+            { pitch: 67, type: "ground" },
+          ],
+          groundPitchClass: 7,
+          rootPitchClass: 0,
         },
+        restPitch: 64,
       },
     });
   });
@@ -164,17 +169,81 @@ describe("projection", () => {
       placement: {
         center: { spans: [] },
         field: { spans: [] },
-        groundingMarks: [],
+        groundingOverlay: undefined,
         restPitch: 72,
-        visibleWindow: {
-          maxPitch: 74,
-          minPitch: 70,
-        },
       },
     });
     expect(projection.segments[1]?.events).toEqual([
       { duration: 2, offset: 0, pitch: 72, type: "rest" },
     ]);
+  });
+
+  test("buildProjectedGroundingOverlays projects root and ground marks within the grounding window", () => {
+    const overlays = buildProjectedGroundingOverlays(
+      {
+        segments: [
+          {
+            center: { pitchClasses: [0, 7, 4] },
+            field: { pitchClasses: [0, 7, 4] },
+            grounding: { ground: 0, root: 0 },
+          },
+          {
+            center: { pitchClasses: [7, 2, 11] },
+            field: { pitchClasses: [7, 2, 11] },
+            grounding: { ground: 7, root: 7 },
+          },
+        ],
+      },
+      [
+        {
+          spans: [
+            { end: 60, start: 60 },
+            { end: 64, start: 64 },
+            { end: 67, start: 67 },
+          ],
+        },
+        {
+          spans: [
+            { end: 62, start: 62 },
+            { end: 67, start: 67 },
+            { end: 71, start: 71 },
+          ],
+        },
+      ],
+      [
+        {
+          spans: [
+            { end: 60, start: 60 },
+            { end: 64, start: 64 },
+            { end: 67, start: 67 },
+          ],
+        },
+        {
+          spans: [
+            { end: 62, start: 62 },
+            { end: 67, start: 67 },
+            { end: 71, start: 71 },
+          ],
+        },
+      ],
+    );
+
+    expect(overlays[0]).toEqual({
+      marks: [
+        { pitch: 60, type: "root" },
+        { pitch: 60, type: "ground" },
+      ],
+      groundPitchClass: 0,
+      rootPitchClass: 0,
+    });
+    expect(overlays[1]).toEqual({
+      marks: [
+        { pitch: 67, type: "root" },
+        { pitch: 67, type: "ground" },
+      ],
+      groundPitchClass: 7,
+      rootPitchClass: 7,
+    });
   });
 
   test("buildProjection annotates adjacent paired spans with joins", () => {

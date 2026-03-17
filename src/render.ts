@@ -2,18 +2,10 @@ import {
   type Projection,
   type ProjectionEvent,
   type ProjectionSegment,
-  type GroundingMark,
-  type ProjectedRegion,
   type ProjectedSpan,
   type Span,
 } from "./projection";
-import {
-  pitchClassToColor,
-  pitchClassToDarkColor,
-  regionToColor,
-} from "./color";
-import { toPitchClass } from "./pitch";
-
+import { regionToColor, regionToWheel24, wheel24ToDarkColor } from "./color";
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 // Layout scale:
@@ -27,11 +19,13 @@ const SEGMENT_GAP = 20;
 const SEGMENT_WIDTH = 120;
 const VERTICAL_PADDING = 100;
 const ROW_HEIGHT = 3;
-const NOTE_RADIUS = 3.5;
+const NOTE_RADIUS = 4;
 const MIN_EVENT_WIDTH = 12;
 const REST_WIDTH = 14;
 const REST_HEIGHT = 2;
-const SPAN_CLEARANCE = 1;
+const GROUNDING_MARK_HEIGHT = 3;
+const GROUNDING_MARK_WIDTH = 10;
+const SPAN_CLEARANCE = 0.5;
 const SPAN_TUCK = Math.max(0, NOTE_RADIUS - ROW_HEIGHT) + SPAN_CLEARANCE;
 
 type ScoreLayout = {
@@ -86,6 +80,26 @@ function getXForSegment(index: number): number {
   return HORIZONTAL_PADDING + index * (SEGMENT_WIDTH + SEGMENT_GAP);
 }
 
+function getCenterDarkColor(projectedSegment: ProjectionSegment): string {
+  const wheelIndex = regionToWheel24(
+    projectedSegment.harmonic.center.pitchClasses,
+  );
+
+  return wheelIndex === undefined ? "#111111" : wheel24ToDarkColor(wheelIndex);
+}
+
+function getSeamX(segmentIndex: number, segmentCount: number): number {
+  if (segmentIndex < 0) {
+    return getXForSegment(0) - SEGMENT_GAP / 2;
+  }
+
+  if (segmentIndex >= segmentCount - 1) {
+    return getXForSegment(segmentCount - 1) + SEGMENT_WIDTH + SEGMENT_GAP / 2;
+  }
+
+  return getXForSegment(segmentIndex) + SEGMENT_WIDTH + SEGMENT_GAP / 2;
+}
+
 function getSpanRect(maxPitch: number, span: Span): SpanRect {
   const top = getYForPitch(maxPitch, span.end) + SPAN_TUCK;
   const bottom = getYForPitch(maxPitch, span.start) - SPAN_TUCK;
@@ -102,26 +116,23 @@ function isDrawableSpanRect(rect: SpanRect): boolean {
   return rect.height > 0;
 }
 
-function appendGroundingMark(
+function appendGroundMark(
   group: SVGGElement,
+  fill: string,
   maxPitch: number,
   segmentX: number,
-  groundingMark: GroundingMark,
+  pitch: number,
 ): void {
   const rect = createSvgElement("rect");
-  const y = getYForPitch(maxPitch, groundingMark.pitch);
-  const height = 6;
-  const width = 10;
-  const x = segmentX + 4;
+  const y = getYForPitch(maxPitch, pitch);
+  const x = segmentX - SEGMENT_GAP / 2;
 
   setAttributes(rect, {
-    fill: pitchClassToDarkColor(toPitchClass(groundingMark.pitch)),
-    height,
-    stroke: "#111111",
-    "stroke-width": 1,
-    width,
+    fill,
+    height: GROUNDING_MARK_HEIGHT,
+    width: GROUNDING_MARK_WIDTH,
     x,
-    y: y - height / 2,
+    y: y - GROUNDING_MARK_HEIGHT / 2,
   });
 
   group.append(rect);
@@ -177,6 +188,7 @@ function getProjectedSpanPath(
   segmentX: number,
   projectedSpan: ProjectedSpan,
 ): string | undefined {
+  const joinExtension = SEGMENT_GAP / 2;
   const currentRect = getSpanRect(maxPitch, projectedSpan);
 
   if (!isDrawableSpanRect(currentRect)) {
@@ -203,11 +215,16 @@ function getProjectedSpanPath(
           projectedSpan.next,
           "next",
         );
-  const rightX = segmentX + SEGMENT_WIDTH;
+  const leftX =
+    segmentX - (projectedSpan.prev === undefined ? joinExtension : 0);
+  const rightX =
+    segmentX +
+    SEGMENT_WIDTH +
+    (projectedSpan.next === undefined ? joinExtension : 0);
 
   return [
     prevHalf === undefined
-      ? `M ${segmentX} ${currentRect.top}`
+      ? `M ${leftX} ${currentRect.top}`
       : `M ${prevHalf.midTop.x} ${prevHalf.midTop.y}`,
     ...(prevHalf === undefined
       ? []
@@ -222,7 +239,7 @@ function getProjectedSpanPath(
     ...(nextHalf === undefined
       ? []
       : [getHalfCubicCommand(nextHalf.bottom, "next", "bottom")]),
-    `L ${segmentX} ${currentRect.bottom}`,
+    `L ${leftX} ${currentRect.bottom}`,
     ...(prevHalf === undefined
       ? []
       : [getHalfCubicCommand(prevHalf.bottom, "prev", "bottom")]),
@@ -394,10 +411,8 @@ function appendNote(
   setAttributes(circle, {
     cx: centerX,
     cy: y,
-    fill: pitchClassToColor(toPitchClass(pitch)),
+    fill: "#111111",
     r: NOTE_RADIUS,
-    stroke: "#111111",
-    "stroke-width": 1,
   });
 
   group.append(circle);
@@ -432,30 +447,13 @@ function appendEventMark(
   }
 }
 
-function appendSegment(
+function appendSegmentForeground(
   group: SVGGElement,
   layout: ScoreLayout,
   projectedSegment: ProjectionSegment,
 ): void {
   const segmentX = getXForSegment(projectedSegment.index);
-  const centerColor =
-    regionToColor(projectedSegment.harmonic.center.pitchClasses) ?? "#111111";
-  const fieldPaint = getFieldPaint();
-  const centerPaint = getCenterPaint(centerColor);
   const label = createSvgElement("text");
-
-  appendRegion(projectedSegment.placement.field, {
-    appendSpan: (span) =>
-      appendProjectedSpan(group, layout.maxPitch, segmentX, span, fieldPaint),
-  });
-  appendRegion(projectedSegment.placement.center, {
-    appendSpan: (span) =>
-      appendProjectedSpan(group, layout.maxPitch, segmentX, span, centerPaint),
-  });
-
-  projectedSegment.placement.groundingMarks.forEach((groundingMark) => {
-    appendGroundingMark(group, layout.maxPitch, segmentX, groundingMark);
-  });
 
   projectedSegment.events.forEach((projectedEvent) => {
     appendEventMark(
@@ -478,14 +476,32 @@ function appendSegment(
   group.append(label);
 }
 
-function appendRegion(
-  projectedRegion: ProjectedRegion,
-  handlers: {
-    appendSpan: (span: ProjectedSpan) => void;
-  },
+function appendSegmentRegions(
+  group: SVGGElement,
+  layout: ScoreLayout,
+  projectedSegment: ProjectionSegment,
 ): void {
-  projectedRegion.spans.forEach((projectedSpan) => {
-    handlers.appendSpan(projectedSpan);
+  const segmentX = getXForSegment(projectedSegment.index);
+  const centerColor =
+    regionToColor(projectedSegment.harmonic.center.pitchClasses) ?? "#111111";
+  const centerDarkColor = getCenterDarkColor(projectedSegment);
+  const fieldPaint = getFieldPaint();
+  const centerPaint = getCenterPaint(centerColor);
+
+  projectedSegment.placement.field.spans.forEach((span) => {
+    appendProjectedSpan(group, layout.maxPitch, segmentX, span, fieldPaint);
+  });
+  projectedSegment.placement.center.spans.forEach((span) => {
+    appendProjectedSpan(group, layout.maxPitch, segmentX, span, centerPaint);
+  });
+  projectedSegment.placement.groundingOverlay?.marks.forEach((mark) => {
+    appendGroundMark(
+      group,
+      centerDarkColor,
+      layout.maxPitch,
+      segmentX,
+      mark.pitch,
+    );
   });
 }
 
@@ -495,12 +511,8 @@ function appendSegmentBoundarySeam(
   segmentIndex: number,
   segmentCount: number,
 ): void {
-  if (segmentIndex >= segmentCount - 1) {
-    return;
-  }
-
   const rect = createSvgElement("rect");
-  const seamX = getXForSegment(segmentIndex) + SEGMENT_WIDTH + SEGMENT_GAP / 2;
+  const seamX = getSeamX(segmentIndex, segmentCount);
 
   setAttributes(rect, {
     fill: "#ffffff",
@@ -511,6 +523,18 @@ function appendSegmentBoundarySeam(
   });
 
   group.append(rect);
+}
+
+function appendAllSegmentSeams(
+  group: SVGGElement,
+  layout: ScoreLayout,
+  segmentCount: number,
+): void {
+  appendSegmentBoundarySeam(group, layout, -1, segmentCount);
+
+  for (let segmentIndex = 0; segmentIndex < segmentCount; segmentIndex += 1) {
+    appendSegmentBoundarySeam(group, layout, segmentIndex, segmentCount);
+  }
 }
 
 function getScoreLayout(projection: Projection): ScoreLayout {
@@ -529,7 +553,9 @@ function getScoreLayout(projection: Projection): ScoreLayout {
 
 function createScoreSvg(projection: Projection): SVGSVGElement {
   const svg = createSvgElement("svg");
+  const regionGroup = createSvgElement("g");
   const seamGroup = createSvgElement("g");
+  const foregroundGroup = createSvgElement("g");
   const layout = getScoreLayout(projection);
 
   svg.setAttribute("viewBox", `0 0 ${layout.width} ${layout.height}`);
@@ -540,20 +566,19 @@ function createScoreSvg(projection: Projection): SVGSVGElement {
 
   projection.segments.forEach((projectedSegment) => {
     const group = createSvgElement("g");
-    appendSegment(group, layout, projectedSegment);
-    svg.append(group);
+    appendSegmentRegions(group, layout, projectedSegment);
+    regionGroup.append(group);
   });
+
+  appendAllSegmentSeams(seamGroup, layout, projection.segments.length);
 
   projection.segments.forEach((projectedSegment) => {
-    appendSegmentBoundarySeam(
-      seamGroup,
-      layout,
-      projectedSegment.index,
-      projection.segments.length,
-    );
+    const group = createSvgElement("g");
+    appendSegmentForeground(group, layout, projectedSegment);
+    foregroundGroup.append(group);
   });
 
-  svg.append(seamGroup);
+  svg.append(regionGroup, seamGroup, foregroundGroup);
 
   return svg;
 }

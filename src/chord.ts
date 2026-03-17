@@ -1,7 +1,7 @@
 import type { PitchClass } from "./model";
 import { toPitchClass, uniqueSortedPitchClasses } from "./pitch";
 
-export type ParsedChordSymbol = {
+type ParsedChordSymbol = {
   groundPitchClass: PitchClass;
   pitchClasses: PitchClass[];
   rootPitchClass: PitchClass;

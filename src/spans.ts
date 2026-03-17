@@ -104,13 +104,6 @@ export function repeatRegionSpanClassesAcrossRange(
   return repeated;
 }
 
-export function buildProjectedRegion(
-  region: HarmonicRegion,
-  visibleWindow: PitchWindow,
-): ProjectedRegion {
-  return buildProjectedRegionInternal(region, visibleWindow).projected;
-}
-
 export function buildLinkedProjectedRegions(
   regions: HarmonicRegion[],
   visibleWindow: PitchWindow,
