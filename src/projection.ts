@@ -9,6 +9,8 @@ import type {
 import { getEventPitches } from "./pitch";
 
 const STAFF_PADDING = 1;
+const REST_ONLY_WINDOW_RADIUS = 5;
+const DEFAULT_PITCH_WINDOW: PitchWindow = { maxPitch: 71, minPitch: 60 };
 
 export type ProjectionEvent =
   | {
@@ -24,12 +26,30 @@ export type ProjectionEvent =
       type: "rest";
     };
 
-export type ProjectionSegment = {
+export type PitchWindow = {
+  maxPitch: number;
+  minPitch: number;
+};
+
+export type ProjectionPlacement = {
+  centerSpans: RegionSpan[];
+  fieldSpans: RegionSpan[];
+  groundingMarks: GroundingMark[];
+  restPitch: number;
+  visibleWindow: PitchWindow;
+};
+
+export type ProjectionHarmonic = {
   center: HarmonicRegion;
   field: HarmonicRegion;
   grounding: Grounding | undefined;
+};
+
+export type ProjectionSegment = {
+  harmonic: ProjectionHarmonic;
   index: number;
   events: ProjectionEvent[];
+  placement: ProjectionPlacement;
   totalDuration: number;
 };
 
@@ -39,9 +59,14 @@ export type Projection = {
   segments: ProjectionSegment[];
 };
 
-export type FieldSpan = {
+export type RegionSpanClass = {
   end: PitchClass;
   start: PitchClass;
+};
+
+export type RegionSpan = {
+  end: number;
+  start: number;
 };
 
 export type GroundingMark = {
@@ -53,22 +78,30 @@ export function buildProjection(
   input: PieceInput,
   harmonicStructure: HarmonicStructure,
 ): Projection {
-  const pitchRange = getPitchRange(input);
-  const middlePitch = Math.round((pitchRange.max + pitchRange.min) / 2);
+  const segmentWindows = buildSegmentWindows(input, getPitchWindow(input));
+  const projectionWindow = getCombinedPitchWindow(segmentWindows);
 
   return {
-    maxPitch: pitchRange.max,
-    minPitch: pitchRange.min,
+    maxPitch: projectionWindow.maxPitch,
+    minPitch: projectionWindow.minPitch,
     segments: input.segments.map((segment, index) => {
       const harmonicSegment = harmonicStructure.segments[index]!;
-      const events = buildProjectionEvents(segment, middlePitch);
+      const segmentWindow = segmentWindows[index]!;
+      const placement = buildProjectionPlacement(
+        harmonicSegment,
+        segmentWindow,
+      );
+      const events = buildProjectionEvents(segment, placement.restPitch);
 
       return {
-        center: harmonicSegment.center,
         events: events.events,
-        field: harmonicSegment.field,
-        grounding: harmonicSegment.grounding,
+        harmonic: {
+          center: harmonicSegment.center,
+          field: harmonicSegment.field,
+          grounding: harmonicSegment.grounding,
+        },
         index,
+        placement,
         totalDuration: events.totalDuration,
       };
     }),
@@ -97,7 +130,9 @@ export function repeatPitchClassesAcrossRange(
   return repeated.sort((left, right) => left - right);
 }
 
-export function buildFieldSpans(region: HarmonicRegion): FieldSpan[] {
+export function buildRegionSpanClasses(
+  region: HarmonicRegion,
+): RegionSpanClass[] {
   if (region.pitchClasses.length === 0) {
     return [];
   }
@@ -105,7 +140,7 @@ export function buildFieldSpans(region: HarmonicRegion): FieldSpan[] {
   const sortedPitchClasses = [...region.pitchClasses].sort(
     (left, right) => left - right,
   );
-  const spans: FieldSpan[] = [
+  const spans: RegionSpanClass[] = [
     { end: sortedPitchClasses[0]!, start: sortedPitchClasses[0]! },
   ];
 
@@ -123,55 +158,163 @@ export function buildFieldSpans(region: HarmonicRegion): FieldSpan[] {
   return spans;
 }
 
-export function repeatFieldSpansAcrossRange(
-  maxPitch: number,
-  minPitch: number,
-  fieldSpan: FieldSpan,
-): FieldSpan[] {
-  const repeated: FieldSpan[] = [];
+export function repeatRegionSpanClassesAcrossRange(
+  visibleWindow: PitchWindow,
+  regionSpanClass: RegionSpanClass,
+): RegionSpan[] {
+  const repeated: RegionSpan[] = [];
 
   for (
-    let octaveBase = Math.floor(minPitch / 12) * 12;
-    octaveBase <= maxPitch;
+    let octaveBase = Math.floor(visibleWindow.minPitch / 12) * 12;
+    octaveBase <= visibleWindow.maxPitch;
     octaveBase += 12
   ) {
-    const startPitch = octaveBase + fieldSpan.start;
-    const endPitch = octaveBase + fieldSpan.end;
+    const startPitch = octaveBase + regionSpanClass.start;
+    const endPitch = octaveBase + regionSpanClass.end;
 
-    if (startPitch > maxPitch || endPitch < minPitch) {
+    if (
+      startPitch > visibleWindow.maxPitch ||
+      endPitch < visibleWindow.minPitch
+    ) {
       continue;
     }
 
     repeated.push({
-      end: Math.min(Math.max(startPitch, endPitch), maxPitch),
-      start: Math.max(Math.min(startPitch, endPitch), minPitch),
+      end: Math.min(Math.max(startPitch, endPitch), visibleWindow.maxPitch),
+      start: Math.max(Math.min(startPitch, endPitch), visibleWindow.minPitch),
     });
   }
 
   return repeated;
 }
 
-export function buildGroundingMarks(
-  projection: Projection,
-  segment: ProjectionSegment,
+function getPitchWindow(input: PieceInput): PitchWindow {
+  return (
+    getPaddedPitchWindow(
+      input.segments.flatMap((segment) =>
+        segment.events.flatMap(getEventPitches),
+      ),
+    ) ?? DEFAULT_PITCH_WINDOW
+  );
+}
+
+function buildSegmentWindows(
+  input: PieceInput,
+  piecePitchWindow: PitchWindow,
+): PitchWindow[] {
+  const segmentPitchRanges = input.segments.map((segment) => {
+    return getPaddedPitchWindow(segment.events.flatMap(getEventPitches));
+  });
+
+  return input.segments.map((_, index) => {
+    const directRange = segmentPitchRanges[index];
+
+    if (directRange !== undefined) {
+      return directRange;
+    }
+
+    const nearestRange = findNearestSegmentPitchRange(
+      segmentPitchRanges,
+      index,
+    );
+    const baseRange = nearestRange ?? {
+      maxPitch: piecePitchWindow.maxPitch,
+      minPitch: piecePitchWindow.minPitch,
+    };
+    const middle = Math.round((baseRange.maxPitch + baseRange.minPitch) / 2);
+
+    return {
+      maxPitch: Math.max(baseRange.maxPitch, middle + REST_ONLY_WINDOW_RADIUS),
+      minPitch: Math.min(baseRange.minPitch, middle - REST_ONLY_WINDOW_RADIUS),
+    };
+  });
+}
+
+function findNearestSegmentPitchRange(
+  segmentPitchRanges: Array<PitchWindow | undefined>,
+  index: number,
+): PitchWindow | undefined {
+  for (let distance = 1; distance < segmentPitchRanges.length; distance += 1) {
+    const left = segmentPitchRanges[index - distance];
+
+    if (left !== undefined) {
+      return left;
+    }
+
+    const right = segmentPitchRanges[index + distance];
+
+    if (right !== undefined) {
+      return right;
+    }
+  }
+
+  return undefined;
+}
+
+function getCombinedPitchWindow(windows: PitchWindow[]): PitchWindow {
+  return {
+    maxPitch: Math.max(...windows.map((window) => window.maxPitch)),
+    minPitch: Math.min(...windows.map((window) => window.minPitch)),
+  };
+}
+
+function buildProjectionPlacement(
+  harmonicSegment: HarmonicStructure["segments"][number],
+  visibleWindow: PitchWindow,
+): ProjectionPlacement {
+  return {
+    centerSpans: buildRegionSpans(harmonicSegment.center, visibleWindow),
+    fieldSpans: buildRegionSpans(harmonicSegment.field, visibleWindow),
+    groundingMarks: getGroundingMarksForRange(
+      visibleWindow.maxPitch,
+      visibleWindow.minPitch,
+      harmonicSegment.grounding,
+    ),
+    restPitch: Math.round(
+      (visibleWindow.maxPitch + visibleWindow.minPitch) / 2,
+    ),
+    visibleWindow,
+  };
+}
+
+function buildRegionSpans(
+  region: HarmonicRegion,
+  visibleWindow: PitchWindow,
+): RegionSpan[] {
+  return buildRegionSpanClasses(region).flatMap((regionSpanClass) =>
+    repeatRegionSpanClassesAcrossRange(visibleWindow, regionSpanClass),
+  );
+}
+
+function getPaddedPitchWindow(pitches: number[]): PitchWindow | undefined {
+  if (pitches.length === 0) {
+    return undefined;
+  }
+
+  return {
+    maxPitch: Math.max(...pitches) + STAFF_PADDING,
+    minPitch: Math.min(...pitches) - STAFF_PADDING,
+  };
+}
+
+function getGroundingMarksForRange(
+  maxPitch: number,
+  minPitch: number,
+  grounding: Grounding | undefined,
 ): GroundingMark[] {
-  if (segment.grounding === undefined) {
+  if (grounding === undefined) {
     return [];
   }
 
-  const rootMarks = repeatPitchClassesAcrossRange(
-    projection.maxPitch,
-    projection.minPitch,
-    [segment.grounding.root],
-  ).map((pitch) => ({
+  const rootMarks = repeatPitchClassesAcrossRange(maxPitch, minPitch, [
+    grounding.root,
+  ]).map((pitch) => ({
     pitch,
     type: "root" as const,
   }));
-  const groundMarks = repeatPitchClassesAcrossRange(
-    projection.maxPitch,
-    projection.minPitch,
-    [segment.grounding.ground],
-  ).map((pitch) => ({
+  const groundMarks = repeatPitchClassesAcrossRange(maxPitch, minPitch, [
+    grounding.ground,
+  ]).map((pitch) => ({
     pitch,
     type: "ground" as const,
   }));
@@ -179,21 +322,6 @@ export function buildGroundingMarks(
   return [...rootMarks, ...groundMarks].sort(
     (left, right) => left.pitch - right.pitch,
   );
-}
-
-function getPitchRange(input: PieceInput): { max: number; min: number } {
-  const pitches = input.segments.flatMap((segment) =>
-    segment.events.flatMap(getEventPitches),
-  );
-
-  if (pitches.length === 0) {
-    return { max: 71, min: 60 };
-  }
-
-  return {
-    max: Math.max(...pitches) + STAFF_PADDING,
-    min: Math.min(...pitches) - STAFF_PADDING,
-  };
 }
 
 function buildProjectionEvents(

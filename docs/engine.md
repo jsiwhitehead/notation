@@ -57,9 +57,11 @@ The harmonic engine follows these principles:
 - Keep grounding explicit when it can be inferred, primarily at the `center` level.
 - Fail gracefully: malformed harmonic guidance or weak harmonic evidence should not break the harmonic engine.
 
-## Current process
+Projection is the next stage after the engine. It takes the analysis-native harmonic structure emitted here and organizes it into visible pitch-space for rendering.
 
-The current harmonic engine is local and deterministic. It processes segments independently. This section describes the current implementation flow, not a permanent algorithmic guarantee.
+## Current implementation
+
+The current harmonic engine is local and deterministic. It processes segments independently. This section describes the current implementation, not a permanent architectural guarantee.
 
 For each segment:
 

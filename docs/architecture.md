@@ -1,6 +1,6 @@
 # Architecture
 
-This document captures the highest-level architecture of the system and the boundaries between its main stages.
+This document captures the highest-level architecture of the system and the boundaries between its main stages. It is the top-level reference for how authored input, harmonic analysis, projection, and rendering fit together.
 
 ## Foundational musical orientation
 
@@ -36,9 +36,10 @@ The system is organized as a simple staged pipeline:
 
 ## Related docs
 
-Detailed specifications live in the focused docs:
+Detailed stage and boundary specifications live in the focused docs:
 
 - `docs/authoring.md`: authored-input approaches and the normalization boundary
 - `docs/engine.md`: canonical harmonic-engine input, output, principles, and current process
-- `docs/render.md`: projection and rendering principles and current approach
+- `docs/projection.md`: projection principles, contract, and current approach
+- `docs/render.md`: rendering principles and current SVG renderer approach
 - `ROADMAP.md`: forward-looking work, sequencing, and open directions

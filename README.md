@@ -13,8 +13,6 @@ The current architecture is a staged pipeline:
 - projection
 - rendering
 
-The harmonic engine derives a singular `center`, broader `field`, and optional `grounding` for each segment. See `docs/engine.md` and `docs/render.md` for the current contracts.
-
 ## Quickstart
 
 ```sh
@@ -35,16 +33,24 @@ bun run format
 - `src/`: TypeScript source files.
 - `static/index.html`: app entry HTML.
 - `static/styles.css`: app styles.
-- `docs/architecture.md`: canonical architecture and invariant contracts.
+- `docs/`: focused architecture, stage, and authored-input docs.
 
 ## Key docs
 
+- `docs/architecture.md`: canonical architecture and invariant contracts.
+- `docs/authoring.md`: authored-input boundary and current authored guidance model.
+- `docs/engine.md`: harmonic-engine contract and current implementation.
+- `docs/projection.md`: projection contract and current pitch-space organization.
+- `docs/render.md`: rendering contract and current SVG renderer behavior.
 - `CONTRIBUTING.md`: contributor workflow and review expectations.
 - `AGENTS.md`: coding-agent guardrails for safe, repo-consistent changes.
-- `docs/architecture.md`: canonical architecture and invariant contracts.
 
 ## Common tasks (links-first)
 
 - Understand system invariants: `docs/architecture.md`
+- Understand authored-input boundaries: `docs/authoring.md`
+- Understand harmonic analysis output: `docs/engine.md`
+- Understand pitch-space projection: `docs/projection.md`
+- Understand SVG rendering behavior: `docs/render.md`
 - Check contributor workflow: `CONTRIBUTING.md`
 - Check agent guardrails: `AGENTS.md`
