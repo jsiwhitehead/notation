@@ -34,7 +34,21 @@ export type PieceInput = {
   segments: SegmentInput[];
 };
 
-export type HarmonicField = {
-  end: PitchClass;
-  start: PitchClass;
+export type Grounding = {
+  ground: PitchClass;
+  root: PitchClass;
+};
+
+export type HarmonicRegion = {
+  pitchClasses: PitchClass[];
+};
+
+export type HarmonicSegment = {
+  center: HarmonicRegion;
+  field: HarmonicRegion;
+  grounding?: Grounding;
+};
+
+export type HarmonicStructure = {
+  segments: HarmonicSegment[];
 };

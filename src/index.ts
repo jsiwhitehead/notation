@@ -1,5 +1,5 @@
 import { runEngine } from "./engine";
-import { buildPlacement } from "./placement";
+import { buildProjection } from "./projection";
 import { renderApp } from "./render";
 import { SEED_INPUT } from "./seed-input";
 
@@ -11,8 +11,8 @@ function main(): void {
   }
 
   const harmonicStructure = runEngine(SEED_INPUT);
-  const placement = buildPlacement(SEED_INPUT, harmonicStructure);
-  const app = renderApp(placement);
+  const projection = buildProjection(SEED_INPUT, harmonicStructure);
+  const app = renderApp(projection);
 
   root.replaceChildren();
   root.append(app);

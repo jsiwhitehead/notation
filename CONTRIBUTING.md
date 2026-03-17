@@ -89,9 +89,10 @@ Canonical domain terms SHOULD be used consistently across code and documentation
 - note, chord, rest
 - duration, layer, offset
 - pitch, pitch class, pitch range
+- fifths-space, pitch-space
 - harmonic engine, harmonic evidence, harmonic structure
 - field, center, grounding, root, ground
-- placement
+- projection, field span
 - rendering
 
 ## Change hygiene

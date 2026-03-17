@@ -1,9 +1,14 @@
-import type { HarmonicField } from "./model";
-import type {
-  Placement,
-  PositionedEvent,
-  PositionedSegment,
-} from "./placement";
+import {
+  buildFieldSpans,
+  buildGroundingMarks,
+  type FieldSpan,
+  type GroundingMark,
+  type ProjectionEvent,
+  type ProjectionSegment,
+  type Projection,
+  repeatPitchClassesAcrossRange,
+  repeatFieldSpansAcrossRange,
+} from "./projection";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const PADDING = 24;
@@ -38,56 +43,6 @@ function getXForSegment(index: number): number {
   return PADDING + index * (SEGMENT_WIDTH + SEGMENT_GAP);
 }
 
-function repeatFieldAcrossRange(
-  maxPitch: number,
-  minPitch: number,
-  field: HarmonicField,
-): HarmonicField[] {
-  const repeated: HarmonicField[] = [];
-
-  for (
-    let octaveBase = Math.floor(minPitch / 12) * 12;
-    octaveBase <= maxPitch;
-    octaveBase += 12
-  ) {
-    const startPitch = octaveBase + field.start;
-    const endPitch = octaveBase + field.end;
-
-    if (startPitch > maxPitch || endPitch < minPitch) {
-      continue;
-    }
-
-    repeated.push({
-      end: Math.min(Math.max(startPitch, endPitch), maxPitch),
-      start: Math.max(Math.min(startPitch, endPitch), minPitch),
-    });
-  }
-
-  return repeated;
-}
-
-function repeatPitchClassesAcrossRange(
-  maxPitch: number,
-  minPitch: number,
-  pitchClasses: number[],
-): number[] {
-  const repeated: number[] = [];
-
-  pitchClasses.forEach((pitchClass) => {
-    for (
-      let pitch = Math.floor(minPitch / 12) * 12 + pitchClass;
-      pitch <= maxPitch;
-      pitch += 12
-    ) {
-      if (pitch >= minPitch) {
-        repeated.push(pitch);
-      }
-    }
-  });
-
-  return repeated.sort((left, right) => left - right);
-}
-
 function appendGrid(
   svg: SVGSVGElement,
   maxPitch: number,
@@ -115,11 +70,11 @@ function appendFieldBlock(
   group: SVGGElement,
   maxPitch: number,
   segmentX: number,
-  field: HarmonicField,
+  fieldSpan: FieldSpan,
 ): void {
   const rect = createSvgElement("rect");
-  const top = getYForPitch(maxPitch, field.end) - ROW_HEIGHT / 2;
-  const bottom = getYForPitch(maxPitch, field.start) + ROW_HEIGHT / 2;
+  const top = getYForPitch(maxPitch, fieldSpan.end) - ROW_HEIGHT / 2;
+  const bottom = getYForPitch(maxPitch, fieldSpan.start) + ROW_HEIGHT / 2;
 
   setAttributes(rect, {
     fill: "#e8e8e8",
@@ -159,7 +114,7 @@ function appendGroundingMark(
   group: SVGGElement,
   maxPitch: number,
   segmentX: number,
-  groundingMark: { pitch: number; type: "ground" | "root" },
+  groundingMark: GroundingMark,
 ): void {
   const line = createSvgElement("line");
   const y = getYForPitch(maxPitch, groundingMark.pitch);
@@ -230,72 +185,42 @@ function appendNote(
   group.append(durationLine, circle);
 }
 
-function buildGroundingMarks(
-  placement: Placement,
-  positionedSegment: PositionedSegment,
-): { pitch: number; type: "ground" | "root" }[] {
-  if (positionedSegment.grounding === undefined) {
-    return [];
-  }
-
-  const rootMarks = repeatPitchClassesAcrossRange(
-    placement.maxPitch,
-    placement.minPitch,
-    [positionedSegment.grounding.root],
-  ).map((pitch) => ({
-    pitch,
-    type: "root" as const,
-  }));
-  const groundMarks = repeatPitchClassesAcrossRange(
-    placement.maxPitch,
-    placement.minPitch,
-    [positionedSegment.grounding.ground],
-  ).map((pitch) => ({
-    pitch,
-    type: "ground" as const,
-  }));
-
-  return [...rootMarks, ...groundMarks].sort(
-    (left, right) => left.pitch - right.pitch,
-  );
-}
-
 function appendEventMark(
   group: SVGGElement,
   maxPitch: number,
   segmentX: number,
-  positionedSegment: PositionedSegment,
-  positionedEvent: PositionedEvent,
+  projectedSegment: ProjectionSegment,
+  projectedEvent: ProjectionEvent,
 ): void {
   const startX =
     segmentX +
-    (positionedEvent.offset / positionedSegment.totalDuration) * SEGMENT_WIDTH;
+    (projectedEvent.offset / projectedSegment.totalDuration) * SEGMENT_WIDTH;
   const endX =
     segmentX +
-    ((positionedEvent.offset + positionedEvent.duration) /
-      positionedSegment.totalDuration) *
+    ((projectedEvent.offset + projectedEvent.duration) /
+      projectedSegment.totalDuration) *
       SEGMENT_WIDTH;
   const centerX = (startX + endX) / 2;
   const width = Math.max(endX - startX, MIN_EVENT_WIDTH);
 
-  switch (positionedEvent.type) {
+  switch (projectedEvent.type) {
     case "pitched":
-      positionedEvent.pitches.forEach((pitch) => {
+      projectedEvent.pitches.forEach((pitch) => {
         appendNote(group, centerX, width, maxPitch, pitch);
       });
       return;
     case "rest":
-      appendRest(group, centerX, width, maxPitch, positionedEvent.pitch);
+      appendRest(group, centerX, width, maxPitch, projectedEvent.pitch);
   }
 }
 
 function appendSegment(
   group: SVGGElement,
-  placement: Placement,
-  positionedSegment: PositionedSegment,
+  projection: Projection,
+  projectedSegment: ProjectionSegment,
 ): void {
-  const { maxPitch, minPitch } = placement;
-  const segmentX = getXForSegment(positionedSegment.index);
+  const { maxPitch, minPitch } = projection;
+  const segmentX = getXForSegment(projectedSegment.index);
   const boundary = createSvgElement("rect");
   const label = createSvgElement("text");
 
@@ -311,31 +236,33 @@ function appendSegment(
 
   group.append(boundary);
 
-  positionedSegment.fields
-    .flatMap((field) => repeatFieldAcrossRange(maxPitch, minPitch, field))
-    .forEach((field) => {
-      appendFieldBlock(group, maxPitch, segmentX, field);
+  buildFieldSpans(projectedSegment.field)
+    .flatMap((fieldSpan) =>
+      repeatFieldSpansAcrossRange(maxPitch, minPitch, fieldSpan),
+    )
+    .forEach((fieldSpan) => {
+      appendFieldBlock(group, maxPitch, segmentX, fieldSpan);
     });
 
   repeatPitchClassesAcrossRange(
     maxPitch,
     minPitch,
-    positionedSegment.centerPitchClasses,
+    projectedSegment.center.pitchClasses,
   ).forEach((pitch) => {
     appendCenterMark(group, maxPitch, segmentX, pitch);
   });
 
-  buildGroundingMarks(placement, positionedSegment).forEach((groundingMark) => {
+  buildGroundingMarks(projection, projectedSegment).forEach((groundingMark) => {
     appendGroundingMark(group, maxPitch, segmentX, groundingMark);
   });
 
-  positionedSegment.positionedEvents.forEach((positionedEvent) => {
+  projectedSegment.events.forEach((projectedEvent) => {
     appendEventMark(
       group,
       maxPitch,
       segmentX,
-      positionedSegment,
-      positionedEvent,
+      projectedSegment,
+      projectedEvent,
     );
   });
 
@@ -345,19 +272,19 @@ function appendSegment(
     x: segmentX,
     y: PADDING - 10,
   });
-  label.textContent = String(positionedSegment.index + 1);
+  label.textContent = String(projectedSegment.index + 1);
 
   group.append(label);
 }
 
-function createScoreSvg(placement: Placement): SVGSVGElement {
+function createScoreSvg(projection: Projection): SVGSVGElement {
   const svg = createSvgElement("svg");
   const width =
     PADDING * 2 +
-    placement.segments.length * SEGMENT_WIDTH +
-    Math.max(placement.segments.length - 1, 0) * SEGMENT_GAP;
+    projection.segments.length * SEGMENT_WIDTH +
+    Math.max(projection.segments.length - 1, 0) * SEGMENT_GAP;
   const height =
-    PADDING * 2 + (placement.maxPitch - placement.minPitch + 1) * ROW_HEIGHT;
+    PADDING * 2 + (projection.maxPitch - projection.minPitch + 1) * ROW_HEIGHT;
 
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
   svg.setAttribute("width", String(width));
@@ -365,18 +292,18 @@ function createScoreSvg(placement: Placement): SVGSVGElement {
   svg.setAttribute("role", "img");
   svg.setAttribute("aria-label", "Simple harmonic score");
 
-  appendGrid(svg, placement.maxPitch, placement.minPitch, width);
+  appendGrid(svg, projection.maxPitch, projection.minPitch, width);
 
-  placement.segments.forEach((placedSegment) => {
+  projection.segments.forEach((projectedSegment) => {
     const group = createSvgElement("g");
-    appendSegment(group, placement, placedSegment);
+    appendSegment(group, projection, projectedSegment);
     svg.append(group);
   });
 
   return svg;
 }
 
-export function renderApp(placement: Placement): HTMLElement {
+export function renderApp(projection: Projection): HTMLElement {
   const app = document.createElement("main");
   const heading = document.createElement("h1");
   const score = document.createElement("div");
@@ -384,7 +311,7 @@ export function renderApp(placement: Placement): HTMLElement {
   app.className = "app";
   heading.textContent = "Notation";
   score.className = "score";
-  score.append(createScoreSvg(placement));
+  score.append(createScoreSvg(projection));
 
   app.append(heading, score);
   return app;

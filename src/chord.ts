@@ -1,4 +1,5 @@
 import type { PitchClass } from "./model";
+import { toPitchClass, uniqueSortedPitchClasses } from "./pitch";
 
 export type ParsedHarmonicGuidance = {
   groundPitchClass: PitchClass;
@@ -39,14 +40,6 @@ type SeventhKind = "diminished" | "major" | "minor" | "none";
 type FifthKind = "flat" | "natural" | "sharp";
 type NinthKind = "flat" | "natural" | "none" | "sharp";
 type EleventhKind = "natural" | "none" | "sharp";
-
-function toPitchClass(value: number): PitchClass {
-  return ((value % 12) + 12) % 12;
-}
-
-function uniqueSortedPitchClasses(values: PitchClass[]): PitchClass[] {
-  return [...new Set(values)].sort((left, right) => left - right);
-}
 
 const ROOT_PITCH_CLASSES = {
   a: 9,

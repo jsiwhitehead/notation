@@ -1,6 +1,6 @@
 # Engine
 
-This document defines the harmonic engine as it exists in this repository. It takes canonical input, derives harmonic structure for each segment, and passes that structure to placement and rendering.
+This document defines the harmonic engine as it exists in this repository. It takes canonical input, derives harmonic structure for each segment, and passes that structure to projection and rendering.
 
 ## Canonical input
 
@@ -34,15 +34,15 @@ The harmonic engine emits harmonic structure. In the current code, that shape is
 
 Each harmonic segment contains:
 
-- `fields`: zero or more non-wrapping principal harmonic fields for the segment
-- `center`: structurally central pitch classes
-- `grounding`: optional grounding pair with `root` and `ground`
+- `field`: a singular harmonic region in fifths-space that describes the broader local harmonic context
+- `center`: a singular harmonic region in fifths-space that describes the immediate harmonic settlement
+- `grounding`: optional grounding pair with `root` and `ground` that primarily orients the `center`
 
-`fields` are simple non-wrapping spans with `start <= end`.
+`field` and `center` are represented as ordered pitch-class collections in fifths-space. They are analysis-native harmonic objects rather than renderer-facing pitch-space spans.
 
-`center` names the structurally central pitch classes within that harmonic structure.
+`center` and `field` are the same kind of object inferred at different scopes. In the simplest cases they may be identical.
 
-`grounding` orients that harmonic structure without reducing the result to a single chord symbol.
+`grounding` orients the `center` without reducing the result to a single chord symbol. `root` names the harmonic orientation within the `center`; `ground` names the actual supporting ground or bass orientation when it differs.
 
 ## Engine principles
 
@@ -50,12 +50,11 @@ The harmonic engine follows these principles:
 
 - Preserve authored input and derive harmonic structure later.
 - Treat harmonic guidance as evidence, not authority.
-- Keep event evidence and guidance evidence distinct internally for as long as practical.
-- Settle local harmonic structure into a stable canonical form.
+- Prefer clear local evidence boundaries even when the current implementation uses simple merged evidence for some decisions.
+- Settle local harmonic structure into a stable canonical form in fifths-space before any downstream pitch-space projection.
 - Derive harmonic structure rather than only a chord symbol.
-- Distinguish fields from center material within that harmonic structure.
-- Distinguish central from peripheral harmonic material.
-- Keep grounding explicit when it can be inferred.
+- Use one harmonic logic for both `center` and `field`, varying evidence scope rather than ontology.
+- Keep grounding explicit when it can be inferred, primarily at the `center` level.
 - Fail gracefully: malformed harmonic guidance or weak harmonic evidence should not break the harmonic engine.
 
 ## Current process
@@ -66,8 +65,7 @@ For each segment:
 
 1. Collect event pitch-class evidence from notes and simultaneities.
 2. Normalize the optional harmonic guidance into guidance pitch-class evidence plus optional root and ground grounding.
-3. Choose field evidence, preferring event evidence when events are present and falling back to guidance evidence otherwise.
-4. Derive a small set of non-wrapping harmonic fields from the chosen evidence.
-5. Derive `center` material from event evidence first, using guidance evidence as support.
-6. Derive `grounding` from trusted guidance grounding when possible, otherwise use a simple field-based fallback.
-7. Emit the segment’s canonical harmonic structure.
+3. Derive `center` from event evidence when available, otherwise from guidance evidence.
+4. Derive `grounding` for that `center` from trusted guidance grounding when possible, otherwise use a simple center-based fallback.
+5. Derive a broader `field` from the combined local evidence available for that segment.
+6. Emit the segment’s canonical harmonic structure in fifths-space.

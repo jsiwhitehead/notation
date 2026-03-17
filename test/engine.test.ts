@@ -1,10 +1,20 @@
 import { describe, expect, test } from "bun:test";
 
 import { runEngine } from "../src/engine";
-import type { PieceInput } from "../src/model";
+import { uniqueFifthsOrderedPitchClasses } from "../src/pitch";
+import type { HarmonicRegion, PieceInput } from "../src/model";
 
 function getSegment(input: PieceInput) {
   return runEngine(input).segments[0]!;
+}
+
+function expectRegionPitchClasses(
+  region: HarmonicRegion,
+  pitchClasses: number[],
+): void {
+  expect(region).toEqual({
+    pitchClasses: uniqueFifthsOrderedPitchClasses(pitchClasses),
+  });
 }
 
 describe("runEngine", () => {
@@ -20,7 +30,8 @@ describe("runEngine", () => {
       ],
     });
 
-    expect(segment.center).toEqual([0, 4, 7]);
+    expectRegionPitchClasses(segment.center, [0, 4, 7]);
+    expectRegionPitchClasses(segment.field, [0, 4, 7]);
   });
 
   test("derives structure from guidance evidence when no events are present", () => {
@@ -33,11 +44,8 @@ describe("runEngine", () => {
       ],
     });
 
-    expect(segment.center).toEqual([0, 4, 7, 11]);
-    expect(segment.fields).toHaveLength(3);
-    expect(segment.fields.flatMap((field) => [field.start, field.end])).toEqual(
-      expect.arrayContaining([0, 4, 7, 11]),
-    );
+    expectRegionPitchClasses(segment.center, [0, 4, 7, 11]);
+    expectRegionPitchClasses(segment.field, [0, 4, 7, 11]);
     expect(segment.grounding).toEqual({ ground: 0, root: 0 });
   });
 
@@ -51,10 +59,11 @@ describe("runEngine", () => {
       ],
     });
 
-    expect(segment.center).toEqual([0, 4, 7]);
+    expectRegionPitchClasses(segment.center, [0, 4, 7]);
+    expectRegionPitchClasses(segment.field, [0, 2, 4, 5, 7, 9]);
   });
 
-  test("derives fields from event evidence when events are present", () => {
+  test("derives field from wider local evidence", () => {
     const segment = getSegment({
       segments: [
         {
@@ -67,10 +76,8 @@ describe("runEngine", () => {
       ],
     });
 
-    expect(segment.fields).toEqual([
-      { end: 0, start: 0 },
-      { end: 6, start: 6 },
-    ]);
+    expectRegionPitchClasses(segment.center, [0, 6]);
+    expectRegionPitchClasses(segment.field, [0, 4, 6, 7, 11]);
   });
 
   test("uses overlapping evidence when guidance and events agree", () => {
@@ -86,11 +93,12 @@ describe("runEngine", () => {
       ],
     });
 
-    expect(segment.center).toEqual([2, 5, 9]);
+    expectRegionPitchClasses(segment.center, [2, 5, 9]);
+    expectRegionPitchClasses(segment.field, [0, 2, 5, 9]);
     expect(segment.grounding).toEqual({ ground: 9, root: 2 });
   });
 
-  test("falls back to simple field grounding for weak unguided evidence", () => {
+  test("falls back to simple center grounding for weak unguided evidence", () => {
     const segment = getSegment({
       segments: [
         {
@@ -102,14 +110,12 @@ describe("runEngine", () => {
       ],
     });
 
-    expect(segment.fields).toEqual([
-      { end: 0, start: 0 },
-      { end: 6, start: 6 },
-    ]);
-    expect(segment.grounding).toEqual({ ground: 6, root: 0 });
+    expectRegionPitchClasses(segment.center, [0, 6]);
+    expectRegionPitchClasses(segment.field, [0, 6]);
+    expect(segment.grounding).toEqual({ ground: 0, root: 0 });
   });
 
-  test("emits only non-wrapping fields", () => {
+  test("emits fifths-space regions for guidance-only material", () => {
     const segment = getSegment({
       segments: [
         {
@@ -119,9 +125,7 @@ describe("runEngine", () => {
       ],
     });
 
-    expect(segment.fields).toEqual([
-      { end: 6, start: 4 },
-      { end: 11, start: 11 },
-    ]);
+    expectRegionPitchClasses(segment.center, [4, 6, 11]);
+    expectRegionPitchClasses(segment.field, [4, 6, 11]);
   });
 });

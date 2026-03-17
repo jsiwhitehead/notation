@@ -2,9 +2,18 @@
 
 ## What this repo is
 
-Notation is a TypeScript project for music rendering using a custom notation system.
+Notation is a TypeScript project for harmonic analysis, projection, and music rendering using a custom notation system.
 
 Work in progress.
+
+The current architecture is a staged pipeline:
+
+- canonical authored input
+- harmonic settlement in fifths-space
+- projection
+- rendering
+
+The harmonic engine derives a singular `center`, broader `field`, and optional `grounding` for each segment. See `docs/engine.md` and `docs/render.md` for the current contracts.
 
 ## Quickstart
 
