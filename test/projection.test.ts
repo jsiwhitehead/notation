@@ -3,23 +3,24 @@ import { describe, expect, test } from "bun:test";
 import {
   buildRegionSpanClasses,
   buildProjection,
-  repeatPitchClassesAcrossRange,
   repeatRegionSpanClassesAcrossRange,
 } from "../src/projection";
+import { repeatPitchClassesAcrossRange } from "../src/pitch";
 
 describe("projection", () => {
-  test("buildRegionSpanClasses groups nearby pitch classes into spans", () => {
-    expect(buildRegionSpanClasses({ pitchClasses: [0, 4, 7, 11] })).toEqual([
-      { end: 0, start: 0 },
-      { end: 4, start: 4 },
-      { end: 7, start: 7 },
-      { end: 11, start: 11 },
+  test("buildRegionSpanClasses groups contiguous tone-runs into spans", () => {
+    expect(
+      buildRegionSpanClasses({ pitchClasses: [0, 2, 4, 5, 7, 9, 11] }),
+    ).toEqual([
+      { end: 4, start: 0 },
+      { end: 11, start: 5 },
     ]);
   });
 
-  test("buildRegionSpanClasses keeps wrapped edge material as separate spans", () => {
+  test("buildRegionSpanClasses splits semitone-adjacent material into separate spans", () => {
     expect(buildRegionSpanClasses({ pitchClasses: [11, 0, 1] })).toEqual([
-      { end: 1, start: 0 },
+      { end: 0, start: 0 },
+      { end: 1, start: 1 },
       { end: 11, start: 11 },
     ]);
   });
@@ -39,7 +40,7 @@ describe("projection", () => {
         { maxPitch: 14, minPitch: 0 },
         { end: 11, start: 11 },
       ),
-    ).toEqual([{ end: 11, start: 11 }]);
+    ).toEqual([]);
   });
 
   test("repeatPitchClassesAcrossRange repeats pitch classes across octaves", () => {
@@ -92,8 +93,8 @@ describe("projection", () => {
       },
     );
 
-    expect(projection.minPitch).toBe(59);
-    expect(projection.maxPitch).toBe(68);
+    expect(projection.minPitch).toBe(58);
+    expect(projection.maxPitch).toBe(69);
     expect(projection.segments[0]).toMatchObject({
       harmonic: {
         center: { pitchClasses: [0, 4, 7] },
@@ -101,24 +102,16 @@ describe("projection", () => {
         grounding: { ground: 7, root: 0 },
       },
       placement: {
-        centerSpans: [
-          { end: 60, start: 60 },
-          { end: 64, start: 64 },
-          { end: 67, start: 67 },
-        ],
-        fieldSpans: [
-          { end: 60, start: 60 },
-          { end: 64, start: 64 },
-          { end: 67, start: 67 },
-        ],
+        centerSpans: [],
+        fieldSpans: [],
         groundingMarks: [
           { pitch: 60, type: "root" },
           { pitch: 67, type: "ground" },
         ],
         restPitch: 64,
         visibleWindow: {
-          maxPitch: 68,
-          minPitch: 59,
+          maxPitch: 69,
+          minPitch: 58,
         },
       },
     });
@@ -151,8 +144,8 @@ describe("projection", () => {
       },
     );
 
-    expect(projection.minPitch).toBe(67);
-    expect(projection.maxPitch).toBe(77);
+    expect(projection.minPitch).toBe(70);
+    expect(projection.maxPitch).toBe(74);
     expect(projection.segments[1]).toMatchObject({
       placement: {
         centerSpans: [],
@@ -160,8 +153,8 @@ describe("projection", () => {
         groundingMarks: [],
         restPitch: 72,
         visibleWindow: {
-          maxPitch: 77,
-          minPitch: 67,
+          maxPitch: 74,
+          minPitch: 70,
         },
       },
     });

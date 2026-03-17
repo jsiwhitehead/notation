@@ -6,10 +6,10 @@ import type {
   PieceInput,
   PitchClass,
 } from "./model";
-import { getEventPitches } from "./pitch";
+import { getEventPitches, repeatPitchClassesAcrossRange } from "./pitch";
 
 const STAFF_PADDING = 1;
-const REST_ONLY_WINDOW_RADIUS = 5;
+const PIECE_WINDOW_PADDING = 1;
 const DEFAULT_PITCH_WINDOW: PitchWindow = { maxPitch: 71, minPitch: 60 };
 
 export type ProjectionEvent =
@@ -78,18 +78,16 @@ export function buildProjection(
   input: PieceInput,
   harmonicStructure: HarmonicStructure,
 ): Projection {
-  const segmentWindows = buildSegmentWindows(input, getPitchWindow(input));
-  const projectionWindow = getCombinedPitchWindow(segmentWindows);
+  const visibleWindow = getPaddedPieceWindow(getPitchWindow(input));
 
   return {
-    maxPitch: projectionWindow.maxPitch,
-    minPitch: projectionWindow.minPitch,
+    maxPitch: visibleWindow.maxPitch,
+    minPitch: visibleWindow.minPitch,
     segments: input.segments.map((segment, index) => {
       const harmonicSegment = harmonicStructure.segments[index]!;
-      const segmentWindow = segmentWindows[index]!;
       const placement = buildProjectionPlacement(
         harmonicSegment,
-        segmentWindow,
+        visibleWindow,
       );
       const events = buildProjectionEvents(segment, placement.restPitch);
 
@@ -106,28 +104,6 @@ export function buildProjection(
       };
     }),
   };
-}
-
-export function repeatPitchClassesAcrossRange(
-  maxPitch: number,
-  minPitch: number,
-  pitchClasses: number[],
-): number[] {
-  const repeated: number[] = [];
-
-  pitchClasses.forEach((pitchClass) => {
-    for (
-      let pitch = Math.floor(minPitch / 12) * 12 + pitchClass;
-      pitch <= maxPitch;
-      pitch += 12
-    ) {
-      if (pitch >= minPitch) {
-        repeated.push(pitch);
-      }
-    }
-  });
-
-  return repeated.sort((left, right) => left - right);
 }
 
 export function buildRegionSpanClasses(
@@ -147,7 +123,7 @@ export function buildRegionSpanClasses(
   sortedPitchClasses.slice(1).forEach((pitchClass) => {
     const currentSpan = spans[spans.length - 1]!;
 
-    if (pitchClass - currentSpan.end <= 2) {
+    if (pitchClass - currentSpan.end === 2) {
       currentSpan.end = pitchClass;
       return;
     }
@@ -162,6 +138,10 @@ export function repeatRegionSpanClassesAcrossRange(
   visibleWindow: PitchWindow,
   regionSpanClass: RegionSpanClass,
 ): RegionSpan[] {
+  if (regionSpanClass.start === regionSpanClass.end) {
+    return [];
+  }
+
   const repeated: RegionSpan[] = [];
 
   for (
@@ -179,10 +159,16 @@ export function repeatRegionSpanClassesAcrossRange(
       continue;
     }
 
-    repeated.push({
+    const clippedSpan = {
       end: Math.min(Math.max(startPitch, endPitch), visibleWindow.maxPitch),
       start: Math.max(Math.min(startPitch, endPitch), visibleWindow.minPitch),
-    });
+    };
+
+    if (clippedSpan.start === clippedSpan.end) {
+      continue;
+    }
+
+    repeated.push(clippedSpan);
   }
 
   return repeated;
@@ -198,63 +184,10 @@ function getPitchWindow(input: PieceInput): PitchWindow {
   );
 }
 
-function buildSegmentWindows(
-  input: PieceInput,
-  piecePitchWindow: PitchWindow,
-): PitchWindow[] {
-  const segmentPitchRanges = input.segments.map((segment) => {
-    return getPaddedPitchWindow(segment.events.flatMap(getEventPitches));
-  });
-
-  return input.segments.map((_, index) => {
-    const directRange = segmentPitchRanges[index];
-
-    if (directRange !== undefined) {
-      return directRange;
-    }
-
-    const nearestRange = findNearestSegmentPitchRange(
-      segmentPitchRanges,
-      index,
-    );
-    const baseRange = nearestRange ?? {
-      maxPitch: piecePitchWindow.maxPitch,
-      minPitch: piecePitchWindow.minPitch,
-    };
-    const middle = Math.round((baseRange.maxPitch + baseRange.minPitch) / 2);
-
-    return {
-      maxPitch: Math.max(baseRange.maxPitch, middle + REST_ONLY_WINDOW_RADIUS),
-      minPitch: Math.min(baseRange.minPitch, middle - REST_ONLY_WINDOW_RADIUS),
-    };
-  });
-}
-
-function findNearestSegmentPitchRange(
-  segmentPitchRanges: Array<PitchWindow | undefined>,
-  index: number,
-): PitchWindow | undefined {
-  for (let distance = 1; distance < segmentPitchRanges.length; distance += 1) {
-    const left = segmentPitchRanges[index - distance];
-
-    if (left !== undefined) {
-      return left;
-    }
-
-    const right = segmentPitchRanges[index + distance];
-
-    if (right !== undefined) {
-      return right;
-    }
-  }
-
-  return undefined;
-}
-
-function getCombinedPitchWindow(windows: PitchWindow[]): PitchWindow {
+function getPaddedPieceWindow(window: PitchWindow): PitchWindow {
   return {
-    maxPitch: Math.max(...windows.map((window) => window.maxPitch)),
-    minPitch: Math.min(...windows.map((window) => window.minPitch)),
+    maxPitch: window.maxPitch + PIECE_WINDOW_PADDING,
+    minPitch: window.minPitch - PIECE_WINDOW_PADDING,
   };
 }
 

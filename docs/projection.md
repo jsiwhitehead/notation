@@ -42,11 +42,11 @@ The carried harmonic structure remains analysis-native and currently contains:
 
 `placement` currently contains:
 
-- a segment-level visible window
+- a shared visible window carried on each segment placement
 - a rest anchor
 - projected field spans
 - projected center spans
-- projected grounding marks
+- projected grounding marks that still distinguish `root` and `ground`
 
 ## Responsibilities
 
@@ -73,7 +73,7 @@ In the current implementation, projection:
 1. derives a visible pitch range from events
 2. computes event offsets layer by layer when offsets are not explicitly authored
 3. preserves durations and simultaneities in the resulting events
-4. chooses a segment-level visible window and local rest anchor
+4. chooses one shared visible window for the piece and a local rest anchor per segment
 5. projects harmonic field spans, center spans, and grounding marks into visible pitch-space
 6. carries forward singular harmonic field, singular harmonic center, and optional grounding
 7. emits projection as the unified structure consumed by the renderer

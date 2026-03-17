@@ -1,7 +1,7 @@
 import type { PitchClass } from "./model";
 import { toPitchClass, uniqueSortedPitchClasses } from "./pitch";
 
-export type ParsedHarmonicGuidance = {
+export type ParsedChordSymbol = {
   groundPitchClass: PitchClass;
   pitchClasses: PitchClass[];
   rootPitchClass: PitchClass;
@@ -300,9 +300,9 @@ function getGuidancePitchClasses(
   );
 }
 
-export function normalizeHarmonicGuidance(
+export function normalizeChordSymbol(
   symbol: string,
-): ParsedHarmonicGuidance | undefined {
+): ParsedChordSymbol | undefined {
   const parsedSymbol = parseHarmonySymbol(symbol);
 
   if (parsedSymbol === undefined) {

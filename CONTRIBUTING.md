@@ -84,7 +84,7 @@ PR checklist:
 
 Canonical domain terms SHOULD be used consistently across code and documentation. Avoid inventing synonyms for the following concepts:
 
-- authored input, harmonic guidance, canonical input
+- authored input, chord symbol, canonical input
 - piece, segment, event
 - note, chord, rest
 - duration, layer, offset
@@ -92,7 +92,7 @@ Canonical domain terms SHOULD be used consistently across code and documentation
 - fifths-space, pitch-space
 - harmonic engine, harmonic evidence, harmonic structure
 - field, center, grounding, root, ground
-- projection, field span
+- projection, span
 - rendering
 
 ## Change hygiene

@@ -41,11 +41,11 @@ The repository currently contains one renderer implementation, which emits a sim
 In the current implementation, rendering:
 
 1. establishes score geometry from the projection pitch range and segment count
-2. draws a background grid and segment boundaries
-3. renders projected field spans as background blocks across the visible pitch range
-4. renders projected center material as a narrower nested span treatment across the visible pitch range
-5. renders projected grounding as distinct root and ground marks
+2. renders projected field spans as full-width background blocks across the visible pitch range
+3. renders projected center material as full-width span overlays across the visible pitch range
+4. renders projected grounding as uniform short grounding blocks, even though projection still distinguishes `root` and `ground`
+5. derives harmonic hue from one shared 24-step fifth-color wheel with a matched dark companion palette
 6. renders events from projected offsets and durations
 7. emits a simple SVG score view
 
-In the current implementation, octave-range repetition, region-span expansion, and grounding-mark placement are projection responsibilities. The renderer consumes those pitch-space decisions and focuses on screen geometry and visual legibility.
+In the current implementation, octave-range repetition, region-span expansion, and grounding-mark placement are projection responsibilities. Harmonic color is renderer-level styling derived from projected pitch and region content. The renderer consumes those pitch-space decisions and focuses on screen geometry and visual legibility.

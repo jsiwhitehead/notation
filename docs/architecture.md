@@ -9,7 +9,7 @@ This system is built on a small set of musical commitments that shape the whole 
 - harmonic structure is treated as relational and spatial, not reduced to a single chord symbol
 - pitch-class evidence is primary
 - fifth-relations matter structurally, and the harmonic engine reasons in circular fifths-space before anything is projected into linear pitch-space
-- harmonic guidance contributes evidence without replacing sounded evidence
+- chord symbols contribute local harmonic evidence without replacing sounded evidence
 - harmonic structure may sometimes be completed conservatively when the evidence strongly implies missing support
 - local harmonic settlement is meaningful even before larger tonal context is resolved
 - the engine derives singular harmonic objects first; downstream projection and rendering decide how those objects appear in visible pitch-space

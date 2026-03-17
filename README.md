@@ -38,7 +38,7 @@ bun run format
 ## Key docs
 
 - `docs/architecture.md`: canonical architecture and invariant contracts.
-- `docs/authoring.md`: authored-input boundary and current authored guidance model.
+- `docs/authoring.md`: authored-input boundary and current authored chord-symbol model.
 - `docs/engine.md`: harmonic-engine contract and current implementation.
 - `docs/projection.md`: projection contract and current pitch-space organization.
 - `docs/render.md`: rendering contract and current SVG renderer behavior.

@@ -1,6 +1,8 @@
-import { normalizeHarmonicGuidance } from "./chord";
+import { normalizeChordSymbol } from "./chord";
 import {
+  fillFifthsGaps,
   getEventPitchClasses,
+  hasAdjacentSemitonePairs,
   uniqueFifthsOrderedPitchClasses,
   uniqueSortedPitchClasses,
 } from "./pitch";
@@ -15,11 +17,14 @@ import type {
   SegmentInput,
 } from "./model";
 
+const MIN_SETTLED_REGION_EVIDENCE = 3;
+const FIELD_CONTINUITY_OVERLAP = 3;
+const MAX_GAP_FILL_SIZE = 3;
+
 type SegmentEvidence = {
-  eventPitchClasses: PitchClass[];
-  guidancePitchClasses: PitchClass[];
-  guidanceGroundPitchClass?: PitchClass;
-  guidanceRootPitchClass?: PitchClass;
+  chordGroundPitchClass?: PitchClass;
+  chordRootPitchClass?: PitchClass;
+  localPitchClasses: PitchClass[];
 };
 
 function buildRegion(evidence: PitchClass[]): HarmonicRegion {
@@ -34,53 +39,59 @@ function countOverlap(left: PitchClass[], right: PitchClass[]): number {
 
 function collectSegmentEvidence(segment: SegmentInput): SegmentEvidence {
   const normalizedGuidance =
-    segment.harmonicGuidance === undefined
+    segment.chordSymbol === undefined
       ? undefined
-      : normalizeHarmonicGuidance(segment.harmonicGuidance);
+      : normalizeChordSymbol(segment.chordSymbol);
+  const eventPitchClasses = uniqueSortedPitchClasses(
+    segment.events.flatMap(getEventPitchClasses),
+  );
+  const guidancePitchClasses = normalizedGuidance?.pitchClasses ?? [];
 
   return {
-    eventPitchClasses: uniqueSortedPitchClasses(
-      segment.events.flatMap(getEventPitchClasses),
-    ),
-    guidancePitchClasses: normalizedGuidance?.pitchClasses ?? [],
+    localPitchClasses: uniqueSortedPitchClasses([
+      ...eventPitchClasses,
+      ...guidancePitchClasses,
+    ]),
     ...(normalizedGuidance === undefined
       ? {}
       : {
-          guidanceGroundPitchClass: normalizedGuidance.groundPitchClass,
-          guidanceRootPitchClass: normalizedGuidance.rootPitchClass,
+          chordGroundPitchClass: normalizedGuidance.groundPitchClass,
+          chordRootPitchClass: normalizedGuidance.rootPitchClass,
         }),
   };
 }
 
-function buildCenter(
-  eventEvidence: PitchClass[],
-  guidanceEvidence: PitchClass[],
-): HarmonicRegion {
-  if (eventEvidence.length > 0) {
-    return buildRegion(eventEvidence);
+function getFilledFifthsRegion(evidence: PitchClass[]): PitchClass[] {
+  if (evidence.length < MIN_SETTLED_REGION_EVIDENCE) {
+    return uniqueSortedPitchClasses(evidence);
   }
 
-  return buildRegion(guidanceEvidence);
+  return fillFifthsGaps(evidence, MAX_GAP_FILL_SIZE);
+}
+
+function buildCenter(segmentEvidence: SegmentEvidence): HarmonicRegion {
+  const pitchClasses = getFilledFifthsRegion(segmentEvidence.localPitchClasses);
+
+  if (hasAdjacentSemitonePairs(pitchClasses)) {
+    return buildRegion([]);
+  }
+
+  return buildRegion(pitchClasses);
 }
 
 function getGrounding(
   center: HarmonicRegion,
   segmentEvidence: SegmentEvidence,
 ): Grounding | undefined {
-  const {
-    guidancePitchClasses,
-    guidanceGroundPitchClass,
-    guidanceRootPitchClass,
-  } = segmentEvidence;
+  const { chordGroundPitchClass, chordRootPitchClass } = segmentEvidence;
 
   if (
-    guidanceRootPitchClass !== undefined &&
-    guidanceGroundPitchClass !== undefined &&
-    countOverlap(center.pitchClasses, guidancePitchClasses) >= 2
+    chordRootPitchClass !== undefined &&
+    chordGroundPitchClass !== undefined
   ) {
     return {
-      ground: guidanceGroundPitchClass,
-      root: guidanceRootPitchClass,
+      ground: chordGroundPitchClass,
+      root: chordRootPitchClass,
     };
   }
 
@@ -94,31 +105,76 @@ function getGrounding(
   };
 }
 
-function getFieldEvidence(segmentEvidence: SegmentEvidence): PitchClass[] {
-  return uniqueSortedPitchClasses([
-    ...segmentEvidence.eventPitchClasses,
-    ...segmentEvidence.guidancePitchClasses,
-  ]);
+function getNeighborCenters(
+  centers: HarmonicRegion[],
+  index: number,
+): HarmonicRegion[] {
+  return [centers[index - 1], centers[index + 1]].filter(
+    (center): center is HarmonicRegion =>
+      center !== undefined && center.pitchClasses.length > 0,
+  );
 }
 
-function analyzeSegment(segment: SegmentInput): HarmonicSegment {
+function buildField(
+  center: HarmonicRegion,
+  neighborCenters: HarmonicRegion[],
+): HarmonicRegion {
+  if (neighborCenters.length === 0) {
+    return buildRegion(center.pitchClasses);
+  }
+
+  const continuityPitchClasses = neighborCenters.flatMap((neighborCenter) => {
+    if (
+      countOverlap(center.pitchClasses, neighborCenter.pitchClasses) >=
+      FIELD_CONTINUITY_OVERLAP
+    ) {
+      return neighborCenter.pitchClasses;
+    }
+
+    return [];
+  });
+
+  if (continuityPitchClasses.length === 0) {
+    return buildRegion(center.pitchClasses);
+  }
+
+  const pitchClasses = getFilledFifthsRegion([
+    ...center.pitchClasses,
+    ...continuityPitchClasses,
+  ]);
+
+  if (hasAdjacentSemitonePairs(pitchClasses)) {
+    return buildRegion(center.pitchClasses);
+  }
+
+  return buildRegion(pitchClasses);
+}
+
+function analyzeSegmentCenter(segment: SegmentInput): {
+  center: HarmonicRegion;
+  grounding: Grounding | undefined;
+} {
   const segmentEvidence = collectSegmentEvidence(segment);
-  const center = buildCenter(
-    segmentEvidence.eventPitchClasses,
-    segmentEvidence.guidancePitchClasses,
-  );
-  const field = buildRegion(getFieldEvidence(segmentEvidence));
+  const center = buildCenter(segmentEvidence);
   const grounding = getGrounding(center, segmentEvidence);
 
   return {
     center,
-    field,
-    ...(grounding === undefined ? {} : { grounding }),
+    grounding,
   };
 }
 
 export function runEngine(input: PieceInput): HarmonicStructure {
+  const analyzedCenters = input.segments.map(analyzeSegmentCenter);
+  const centers = analyzedCenters.map((segment) => segment.center);
+
   return {
-    segments: input.segments.map(analyzeSegment),
+    segments: analyzedCenters.map(
+      ({ center, grounding }, index): HarmonicSegment => ({
+        center,
+        field: buildField(center, getNeighborCenters(centers, index)),
+        ...(grounding === undefined ? {} : { grounding }),
+      }),
+    ),
   };
 }

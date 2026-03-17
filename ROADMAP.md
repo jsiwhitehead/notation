@@ -1,10 +1,8 @@
 # Roadmap
 
-This document describes the main work ahead for the repository. It is intentionally forward-looking: it focuses on sequencing and open directions rather than the current architectural contract.
+This document describes the main forward-looking work for the repository. It intentionally focuses on open next steps rather than repeating behavior that already exists in the current codebase.
 
 ## Canonical model and contracts
-
-This section covers the shared models and contracts that connect authored input, the harmonic engine, projection, and rendering.
 
 - refine the canonical input beyond its current minimal shape
 - define stronger contracts for segment structure, duration, offsets, and layers
@@ -16,20 +14,15 @@ This section covers the shared models and contracts that connect authored input,
 
 ## Harmonic engine
 
-This section covers harmonic engine behavior.
-
-- strengthen field derivation beyond the current simple merged local evidence
-- strengthen center selection beyond the current simple event-first local evidence
+- strengthen field derivation beyond the current basic neighboring-center continuity
 - improve fallback grounding inference beyond the current simple center-based fallback
-- define how implied harmonic support such as probable fifth completion should appear
+- define and support implied harmonic support such as probable-fifth and other implied-tone logic
 - define the boundary between engine inference, projection behavior, and contextual analysis across segments
 - define when harmonic structure should be expressed in a shared piece-level orientation versus purely local orientation
 - define the contract between local harmonic structure and larger-scale key or scale context
 - strengthen separation of harmonic evidence kinds within engine inference
-- add implied-tone and probable-fifth logic
+- support second-level chord-implied pitch classes separate from committed chord-symbol pitch classes
 - add guide-based or block-based harmonic-structure interpretations
-- add circle-of-fifths-based harmonic-orientation ideas
-- add contextual analysis across neighboring segments
 - support more musically convincing handling of augmented-like and diminished-like collections
 - define how to choose among musically equivalent local harmonic orientations
 - define how harmonic structure should represent confidence, ambiguity, or multiple viable readings
@@ -37,16 +30,9 @@ This section covers harmonic engine behavior.
 
 ## Projection
 
-This section covers projection behavior.
-
-- add continuity-aware register selection
-- add nearest-note or leading-aware projection behavior
-- improve handling of cross-segment motion
-- define how vertical or register projection should be chosen beyond explicitly authored pitch
+- define and implement stronger register-selection and motion-aware projection policies
 - improve defaults for sparse or rest-heavy segments beyond the current basic rest and range heuristics
-- define the continuity policy for projection versus rendering-specific behavior
 - define how visible pitch windows and pitch bounds should be chosen more intentionally
-- add melodic continuity and movement-aware note projection
 - strengthen the connection between harmonic structure and event shape in projection
 - add cross-segment alignment and curve logic for harmonic shapes and boundaries
 - define how root, ground, guides, blocks, and motion cues should participate in projection
@@ -57,29 +43,19 @@ This section covers projection behavior.
 
 ## Rendering
 
-This section covers rendering.
-
-- improve legibility of duration, rests, harmonic fields, center material, and grounding
 - preserve the current simple renderer as a baseline while introducing one richer rendering
 - add stronger cross-segment harmonic-shape rendering
 - add more notation-like glyph rendering
 - add fuller rhythmic-detail rendering such as stems, dots, beams, ties, and grouped rests
-- add color systems derived from harmonic identity
-- define a durable rendering direction from the current visual language and the main renderings
-- define the boundary between projection continuity and visible continuity in rendering
-- define the role of visible harmonic repetition in rendering
-- define how much visual detail should be used for duration, rests, and harmonic structure
-- define which visual channels belong to harmonic identity, function, confidence, or continuity
+- refine the harmonic color system for role clarity and perceptual tuning
+- define a durable rendering direction, including continuity policy, repetition policy, visual-detail level, and visual-channel assignments
 - support renderer overlays for analysis features such as grounding, guides, blocks, and motion cues
-- support multiple renderings and renderer implementations sharing one projection
-- support multiple renderings of the same projection
+- support multiple renderer implementations and multiple renderings of the same projection
 - support interactive overlays and analysis views
 - support accessibility and legibility in different display contexts
 - support export-oriented renderers for publication or interchange
 
 ## Authored input and normalization
-
-This section covers authored input and normalization. This area intentionally follows engine, projection, and rendering work.
 
 - define one or more first-class normalization paths into canonical input
 - define which authored guidance belongs in canonical input and which belongs above normalization
@@ -88,17 +64,13 @@ This section covers authored input and normalization. This area intentionally fo
 - define which authored-input path should become first-class after direct seed data
 - support piece-level metadata such as time-grid declarations, height hints, and global flags where justified
 - support multi-line or multi-layer authored input that still normalizes cleanly
-- add compact text parsing and normalization
-- add richer event grouping and lightweight octave notation
-- add stronger authored guidance where appropriate
+- add compact text parsing, richer event grouping, lightweight octave notation, and stronger authored guidance where appropriate
 - define which authored-input ideas fit the current contract
 - support import/export adapters
 - support live-editable authoring interfaces and multiple authoring frontends targeting the same canonical model
 - support evidence-first or rolling-input workflows where they can normalize into the same contract
 
 ## Examples, corpus, and evaluation
-
-This section covers examples, comparisons, and evaluation material.
 
 - collect representative fragments and longer continuous pieces that exercise the intended notation language
 - preserve successful examples in a maintained corpus
