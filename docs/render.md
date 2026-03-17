@@ -41,11 +41,13 @@ The repository currently contains one renderer implementation, which emits a sim
 In the current implementation, rendering:
 
 1. establishes score geometry from the projection pitch range and segment count
-2. renders projected field spans as full-width background blocks across the visible pitch range
-3. renders projected center material as full-width span overlays across the visible pitch range
-4. renders projected grounding as uniform short grounding blocks, even though projection still distinguishes `root` and `ground`
-5. derives harmonic hue from one shared 24-step fifth-color wheel with a matched dark companion palette
-6. renders events from projected offsets and durations
-7. emits a simple SVG score view
+2. renders projected field spans as combined SVG path shapes, including any projection-resolved half-joins
+3. renders projected center material as combined SVG path shapes, including any projection-resolved half-joins
+4. draws a simple white seam between adjacent segments as a renderer-level visual divider
+5. renders projection-resolved joins between adjacent field and center spans from the absolute neighboring span geometry carried on each projected span
+6. renders projected grounding as uniform short grounding blocks, even though projection still distinguishes `root` and `ground`
+7. derives harmonic hue from one shared 24-step fifth-color wheel with a matched dark companion palette
+8. renders events from projected offsets and durations
+9. emits a simple SVG score view
 
-In the current implementation, octave-range repetition, region-span expansion, and grounding-mark placement are projection responsibilities. Harmonic color is renderer-level styling derived from projected pitch and region content. The renderer consumes those pitch-space decisions and focuses on screen geometry and visual legibility.
+In the current implementation, octave-range repetition, whole-span expansion, join determination, and grounding-mark placement are projection responsibilities. Harmonic color, join geometry, and the segment seam are renderer-level styling derived from projected pitch and region content. The renderer consumes those pitch-space decisions and focuses on screen geometry and visual legibility.

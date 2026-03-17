@@ -5,7 +5,7 @@ This document describes the main forward-looking work for the repository. It int
 ## Canonical model and contracts
 
 - refine the canonical input beyond its current minimal shape
-- define stronger contracts for segment structure, duration, offsets, and layers
+- strengthen contracts for segment structure, duration, offsets, and layers
 - define where piece-level metadata such as time-grid declarations, height hints, or global bias flags belongs
 - define where authored structural guidance such as block cues or guide cues belongs
 - define stable serialization and interchange formats for canonical input, harmonic structure, and projection
@@ -32,9 +32,9 @@ This document describes the main forward-looking work for the repository. It int
 
 - define and implement stronger register-selection and motion-aware projection policies
 - improve defaults for sparse or rest-heavy segments beyond the current basic rest and range heuristics
-- define how visible pitch windows and pitch bounds should be chosen more intentionally
+- refine visible pitch-window and pitch-bound selection policies
 - strengthen the connection between harmonic structure and event shape in projection
-- add cross-segment alignment and curve logic for harmonic shapes and boundaries
+- refine cross-segment span alignment and join logic for harmonic shapes and boundaries
 - define how root, ground, guides, blocks, and motion cues should participate in projection
 - support a stronger treatment of multiple layers
 - support clearer treatment of simultaneity across multiple lines or hands
@@ -44,8 +44,8 @@ This document describes the main forward-looking work for the repository. It int
 ## Rendering
 
 - preserve the current simple renderer as a baseline while introducing one richer rendering
-- add stronger cross-segment harmonic-shape rendering
-- add more notation-like glyph rendering
+- refine current cross-segment harmonic-shape rendering and join styling
+- expand current note and rest rendering toward fuller notation-like glyph treatment
 - add fuller rhythmic-detail rendering such as stems, dots, beams, ties, and grouped rests
 - refine the harmonic color system for role clarity and perceptual tuning
 - define a durable rendering direction, including continuity policy, repetition policy, visual-detail level, and visual-channel assignments
@@ -57,15 +57,14 @@ This document describes the main forward-looking work for the repository. It int
 
 ## Authored input and normalization
 
-- define one or more first-class normalization paths into canonical input
+- formalize and implement one or more first-class normalization paths into canonical input
 - define which authored guidance belongs in canonical input and which belongs above normalization
 - support richer segment structure without pre-encoding harmonic structure
 - preserve the distinction between authored guidance and derived results
-- define which authored-input path should become first-class after direct seed data
+- choose which authored-input path should become first-class after direct seed data
 - support piece-level metadata such as time-grid declarations, height hints, and global flags where justified
 - support multi-line or multi-layer authored input that still normalizes cleanly
 - add compact text parsing, richer event grouping, lightweight octave notation, and stronger authored guidance where appropriate
-- define which authored-input ideas fit the current contract
 - support import/export adapters
 - support live-editable authoring interfaces and multiple authoring frontends targeting the same canonical model
 - support evidence-first or rolling-input workflows where they can normalize into the same contract
@@ -74,10 +73,10 @@ This document describes the main forward-looking work for the repository. It int
 
 - collect representative fragments and longer continuous pieces that exercise the intended notation language
 - preserve successful examples in a maintained corpus
-- expand fixture sets across representative musical cases
+- expand the current fixture set across representative musical cases
 - add side-by-side fixture comparisons across engine policies
 - build side-by-side examples that compare authoring inputs, harmonic structures, projections, and rendered outputs
-- define what counts as a successful result for engine behavior, projection behavior, and rendering legibility
+- formalize success criteria for engine behavior, projection behavior, and rendering legibility
 - add confidence checks for ambiguous or weakly evidenced material
 - support visual regression snapshots for renderer work where useful
 - support comparative examples across multiple engine or renderer policies

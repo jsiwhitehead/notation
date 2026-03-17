@@ -4,9 +4,24 @@ import type {
   HarmonicRegion,
   HarmonicStructure,
   PieceInput,
-  PitchClass,
 } from "./model";
 import { getEventPitches, repeatPitchClassesAcrossRange } from "./pitch";
+import {
+  buildLinkedProjectedRegions,
+  type ProjectedRegion,
+  type PitchWindow,
+} from "./spans";
+
+export {
+  buildLinkedProjectedRegions,
+  buildRegionSpanClasses,
+  repeatRegionSpanClassesAcrossRange,
+  type PitchWindow,
+  type ProjectedRegion,
+  type ProjectedSpan,
+  type RegionSpanClass,
+  type Span,
+} from "./spans";
 
 const STAFF_PADDING = 1;
 const PIECE_WINDOW_PADDING = 1;
@@ -26,14 +41,9 @@ export type ProjectionEvent =
       type: "rest";
     };
 
-export type PitchWindow = {
-  maxPitch: number;
-  minPitch: number;
-};
-
 export type ProjectionPlacement = {
-  centerSpans: RegionSpan[];
-  fieldSpans: RegionSpan[];
+  center: ProjectedRegion;
+  field: ProjectedRegion;
   groundingMarks: GroundingMark[];
   restPitch: number;
   visibleWindow: PitchWindow;
@@ -59,16 +69,6 @@ export type Projection = {
   segments: ProjectionSegment[];
 };
 
-export type RegionSpanClass = {
-  end: PitchClass;
-  start: PitchClass;
-};
-
-export type RegionSpan = {
-  end: number;
-  start: number;
-};
-
 export type GroundingMark = {
   pitch: number;
   type: "ground" | "root";
@@ -79,99 +79,42 @@ export function buildProjection(
   harmonicStructure: HarmonicStructure,
 ): Projection {
   const visibleWindow = getPaddedPieceWindow(getPitchWindow(input));
+  const projectedCenters = buildLinkedProjectedRegions(
+    harmonicStructure.segments.map((segment) => segment.center),
+    visibleWindow,
+  );
+  const projectedFields = buildLinkedProjectedRegions(
+    harmonicStructure.segments.map((segment) => segment.field),
+    visibleWindow,
+  );
+  const segments: ProjectionSegment[] = input.segments.map((segment, index) => {
+    const harmonicSegment = harmonicStructure.segments[index]!;
+    const placement = buildProjectionPlacement(
+      harmonicSegment,
+      projectedCenters[index]!,
+      projectedFields[index]!,
+      visibleWindow,
+    );
+    const events = buildProjectionEvents(segment, placement.restPitch);
+
+    return {
+      events: events.events,
+      harmonic: {
+        center: harmonicSegment.center,
+        field: harmonicSegment.field,
+        grounding: harmonicSegment.grounding,
+      },
+      index,
+      placement,
+      totalDuration: events.totalDuration,
+    };
+  });
 
   return {
     maxPitch: visibleWindow.maxPitch,
     minPitch: visibleWindow.minPitch,
-    segments: input.segments.map((segment, index) => {
-      const harmonicSegment = harmonicStructure.segments[index]!;
-      const placement = buildProjectionPlacement(
-        harmonicSegment,
-        visibleWindow,
-      );
-      const events = buildProjectionEvents(segment, placement.restPitch);
-
-      return {
-        events: events.events,
-        harmonic: {
-          center: harmonicSegment.center,
-          field: harmonicSegment.field,
-          grounding: harmonicSegment.grounding,
-        },
-        index,
-        placement,
-        totalDuration: events.totalDuration,
-      };
-    }),
+    segments,
   };
-}
-
-export function buildRegionSpanClasses(
-  region: HarmonicRegion,
-): RegionSpanClass[] {
-  if (region.pitchClasses.length === 0) {
-    return [];
-  }
-
-  const sortedPitchClasses = [...region.pitchClasses].sort(
-    (left, right) => left - right,
-  );
-  const spans: RegionSpanClass[] = [
-    { end: sortedPitchClasses[0]!, start: sortedPitchClasses[0]! },
-  ];
-
-  sortedPitchClasses.slice(1).forEach((pitchClass) => {
-    const currentSpan = spans[spans.length - 1]!;
-
-    if (pitchClass - currentSpan.end === 2) {
-      currentSpan.end = pitchClass;
-      return;
-    }
-
-    spans.push({ end: pitchClass, start: pitchClass });
-  });
-
-  return spans;
-}
-
-export function repeatRegionSpanClassesAcrossRange(
-  visibleWindow: PitchWindow,
-  regionSpanClass: RegionSpanClass,
-): RegionSpan[] {
-  if (regionSpanClass.start === regionSpanClass.end) {
-    return [];
-  }
-
-  const repeated: RegionSpan[] = [];
-
-  for (
-    let octaveBase = Math.floor(visibleWindow.minPitch / 12) * 12;
-    octaveBase <= visibleWindow.maxPitch;
-    octaveBase += 12
-  ) {
-    const startPitch = octaveBase + regionSpanClass.start;
-    const endPitch = octaveBase + regionSpanClass.end;
-
-    if (
-      startPitch > visibleWindow.maxPitch ||
-      endPitch < visibleWindow.minPitch
-    ) {
-      continue;
-    }
-
-    const clippedSpan = {
-      end: Math.min(Math.max(startPitch, endPitch), visibleWindow.maxPitch),
-      start: Math.max(Math.min(startPitch, endPitch), visibleWindow.minPitch),
-    };
-
-    if (clippedSpan.start === clippedSpan.end) {
-      continue;
-    }
-
-    repeated.push(clippedSpan);
-  }
-
-  return repeated;
 }
 
 function getPitchWindow(input: PieceInput): PitchWindow {
@@ -193,11 +136,13 @@ function getPaddedPieceWindow(window: PitchWindow): PitchWindow {
 
 function buildProjectionPlacement(
   harmonicSegment: HarmonicStructure["segments"][number],
+  projectedCenter: ProjectedRegion,
+  projectedField: ProjectedRegion,
   visibleWindow: PitchWindow,
 ): ProjectionPlacement {
   return {
-    centerSpans: buildRegionSpans(harmonicSegment.center, visibleWindow),
-    fieldSpans: buildRegionSpans(harmonicSegment.field, visibleWindow),
+    center: projectedCenter,
+    field: projectedField,
     groundingMarks: getGroundingMarksForRange(
       visibleWindow.maxPitch,
       visibleWindow.minPitch,
@@ -208,15 +153,6 @@ function buildProjectionPlacement(
     ),
     visibleWindow,
   };
-}
-
-function buildRegionSpans(
-  region: HarmonicRegion,
-  visibleWindow: PitchWindow,
-): RegionSpan[] {
-  return buildRegionSpanClasses(region).flatMap((regionSpanClass) =>
-    repeatRegionSpanClassesAcrossRange(visibleWindow, regionSpanClass),
-  );
 }
 
 function getPaddedPitchWindow(pitches: number[]): PitchWindow | undefined {
