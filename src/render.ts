@@ -1,4 +1,4 @@
-import type { HarmonicRegion } from "./model";
+import type { HarmonicField } from "./model";
 import type {
   Placement,
   PositionedEvent,
@@ -38,20 +38,20 @@ function getXForSegment(index: number): number {
   return PADDING + index * (SEGMENT_WIDTH + SEGMENT_GAP);
 }
 
-function repeatRegionAcrossRange(
+function repeatFieldAcrossRange(
   maxPitch: number,
   minPitch: number,
-  region: HarmonicRegion,
-): HarmonicRegion[] {
-  const repeated: HarmonicRegion[] = [];
+  field: HarmonicField,
+): HarmonicField[] {
+  const repeated: HarmonicField[] = [];
 
   for (
     let octaveBase = Math.floor(minPitch / 12) * 12;
     octaveBase <= maxPitch;
     octaveBase += 12
   ) {
-    const startPitch = octaveBase + region.start;
-    const endPitch = octaveBase + region.end;
+    const startPitch = octaveBase + field.start;
+    const endPitch = octaveBase + field.end;
 
     if (startPitch > maxPitch || endPitch < minPitch) {
       continue;
@@ -111,15 +111,15 @@ function appendGrid(
   }
 }
 
-function appendRegionBlock(
+function appendFieldBlock(
   group: SVGGElement,
   maxPitch: number,
   segmentX: number,
-  region: HarmonicRegion,
+  field: HarmonicField,
 ): void {
   const rect = createSvgElement("rect");
-  const top = getYForPitch(maxPitch, region.end) - ROW_HEIGHT / 2;
-  const bottom = getYForPitch(maxPitch, region.start) + ROW_HEIGHT / 2;
+  const top = getYForPitch(maxPitch, field.end) - ROW_HEIGHT / 2;
+  const bottom = getYForPitch(maxPitch, field.start) + ROW_HEIGHT / 2;
 
   setAttributes(rect, {
     fill: "#e8e8e8",
@@ -311,10 +311,10 @@ function appendSegment(
 
   group.append(boundary);
 
-  positionedSegment.regions
-    .flatMap((region) => repeatRegionAcrossRange(maxPitch, minPitch, region))
-    .forEach((region) => {
-      appendRegionBlock(group, maxPitch, segmentX, region);
+  positionedSegment.fields
+    .flatMap((field) => repeatFieldAcrossRange(maxPitch, minPitch, field))
+    .forEach((field) => {
+      appendFieldBlock(group, maxPitch, segmentX, field);
     });
 
   repeatPitchClassesAcrossRange(

@@ -1,5 +1,5 @@
 import type { Grounding, HarmonicStructure } from "./engine";
-import type { EventOffset, HarmonicRegion, PieceInput } from "./model";
+import type { EventOffset, HarmonicField, PieceInput } from "./model";
 
 const STAFF_PADDING = 1;
 
@@ -19,10 +19,10 @@ export type PositionedEvent =
 
 export type PositionedSegment = {
   centerPitchClasses: number[];
+  fields: HarmonicField[];
   grounding: Grounding | undefined;
   index: number;
   positionedEvents: PositionedEvent[];
-  regions: HarmonicRegion[];
   totalDuration: number;
 };
 
@@ -119,10 +119,10 @@ export function buildPlacement(
 
       return {
         centerPitchClasses: harmonicSegment.center,
+        fields: harmonicSegment.fields,
         grounding: harmonicSegment.grounding,
         index,
         positionedEvents: placedEvents.positionedEvents,
-        regions: harmonicSegment.regions,
         totalDuration: placedEvents.totalDuration,
       };
     }),

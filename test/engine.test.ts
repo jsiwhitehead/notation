@@ -34,10 +34,10 @@ describe("runEngine", () => {
     });
 
     expect(segment.center).toEqual([0, 4, 7, 11]);
-    expect(segment.regions).toHaveLength(3);
-    expect(
-      segment.regions.flatMap((region) => [region.start, region.end]),
-    ).toEqual(expect.arrayContaining([0, 4, 7, 11]));
+    expect(segment.fields).toHaveLength(3);
+    expect(segment.fields.flatMap((field) => [field.start, field.end])).toEqual(
+      expect.arrayContaining([0, 4, 7, 11]),
+    );
     expect(segment.grounding).toEqual({ ground: 0, root: 0 });
   });
 
@@ -54,7 +54,7 @@ describe("runEngine", () => {
     expect(segment.center).toEqual([0, 4, 7]);
   });
 
-  test("derives regions from event evidence when events are present", () => {
+  test("derives fields from event evidence when events are present", () => {
     const segment = getSegment({
       segments: [
         {
@@ -67,7 +67,7 @@ describe("runEngine", () => {
       ],
     });
 
-    expect(segment.regions).toEqual([
+    expect(segment.fields).toEqual([
       { end: 0, start: 0 },
       { end: 6, start: 6 },
     ]);
@@ -90,7 +90,7 @@ describe("runEngine", () => {
     expect(segment.grounding).toEqual({ ground: 9, root: 2 });
   });
 
-  test("falls back to simple region grounding for weak unguided evidence", () => {
+  test("falls back to simple field grounding for weak unguided evidence", () => {
     const segment = getSegment({
       segments: [
         {
@@ -102,14 +102,14 @@ describe("runEngine", () => {
       ],
     });
 
-    expect(segment.regions).toEqual([
+    expect(segment.fields).toEqual([
       { end: 0, start: 0 },
       { end: 6, start: 6 },
     ]);
     expect(segment.grounding).toEqual({ ground: 6, root: 0 });
   });
 
-  test("emits only non-wrapping regions", () => {
+  test("emits only non-wrapping fields", () => {
     const segment = getSegment({
       segments: [
         {
@@ -119,7 +119,7 @@ describe("runEngine", () => {
       ],
     });
 
-    expect(segment.regions).toEqual([
+    expect(segment.fields).toEqual([
       { end: 6, start: 4 },
       { end: 11, start: 11 },
     ]);

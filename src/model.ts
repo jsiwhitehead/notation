@@ -34,7 +34,7 @@ export type PieceInput = {
   segments: SegmentInput[];
 };
 
-export type HarmonicRegion = {
+export type HarmonicField = {
   end: PitchClass;
   start: PitchClass;
 };

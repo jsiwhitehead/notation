@@ -2,7 +2,7 @@ import { normalizeHarmonicGuidance } from "./chord";
 
 import type {
   EventInput,
-  HarmonicRegion,
+  HarmonicField,
   PitchClass,
   PieceInput,
   SegmentInput,
@@ -23,8 +23,8 @@ export type Grounding = {
 
 export type HarmonicSegment = {
   center: PitchClass[];
+  fields: HarmonicField[];
   grounding?: Grounding;
-  regions: HarmonicRegion[];
 };
 
 export type HarmonicStructure = {
@@ -49,7 +49,7 @@ function getEventPitchClasses(event: EventInput): PitchClass[] {
   }
 }
 
-function buildRegionRuns(evidence: PitchClass[]): PitchClass[][] {
+function buildFieldRuns(evidence: PitchClass[]): PitchClass[][] {
   if (evidence.length === 0) {
     return [];
   }
@@ -102,12 +102,12 @@ function buildRegionRuns(evidence: PitchClass[]): PitchClass[][] {
   return runs;
 }
 
-function buildRegions(evidence: PitchClass[]): HarmonicRegion[] {
+function buildFields(evidence: PitchClass[]): HarmonicField[] {
   if (evidence.length < 2) {
     return [];
   }
 
-  return buildRegionRuns(evidence)
+  return buildFieldRuns(evidence)
     .flatMap((run) => {
       const start = run[0]!;
       const end = run[run.length - 1]!;
@@ -164,7 +164,7 @@ function collectSegmentEvidence(segment: SegmentInput): SegmentEvidence {
 function buildCenter(
   eventEvidence: PitchClass[],
   guidanceEvidence: PitchClass[],
-  regions: HarmonicRegion[],
+  fields: HarmonicField[],
 ): PitchClass[] {
   if (eventEvidence.length === 0 && guidanceEvidence.length === 0) {
     return [];
@@ -174,7 +174,7 @@ function buildCenter(
     guidanceEvidence.includes(pitch),
   );
   const boundaryNotes = uniqueSortedPitchClasses(
-    regions.flatMap((region) => [region.start, region.end]),
+    fields.flatMap((field) => [field.start, field.end]),
   );
   const eventBoundaryNotes = boundaryNotes.filter((pitch) =>
     eventEvidence.includes(pitch),
@@ -205,7 +205,7 @@ function buildCenter(
 function getGrounding(
   center: PitchClass[],
   segmentEvidence: SegmentEvidence,
-  regions: HarmonicRegion[],
+  fields: HarmonicField[],
 ): Grounding | undefined {
   const {
     guidancePitchClasses,
@@ -214,10 +214,10 @@ function getGrounding(
   } = segmentEvidence;
 
   if (guidancePitchClasses.length < 3) {
-    if (regions.length === 2) {
+    if (fields.length === 2) {
       return {
-        ground: regions[1]!.start,
-        root: regions[0]!.start,
+        ground: fields[1]!.start,
+        root: fields[0]!.start,
       };
     }
 
@@ -225,10 +225,10 @@ function getGrounding(
   }
 
   if (countOverlap(center, guidancePitchClasses) < 2) {
-    return regions.length === 2
+    return fields.length === 2
       ? {
-          ground: regions[1]!.start,
-          root: regions[0]!.start,
+          ground: fields[1]!.start,
+          root: fields[0]!.start,
         }
       : undefined;
   }
@@ -246,7 +246,7 @@ function getGrounding(
   };
 }
 
-function getRegionEvidence(segmentEvidence: SegmentEvidence): PitchClass[] {
+function getFieldEvidence(segmentEvidence: SegmentEvidence): PitchClass[] {
   return segmentEvidence.eventPitchClasses.length > 0
     ? segmentEvidence.eventPitchClasses
     : segmentEvidence.guidancePitchClasses;
@@ -254,19 +254,19 @@ function getRegionEvidence(segmentEvidence: SegmentEvidence): PitchClass[] {
 
 function analyzeSegment(segment: SegmentInput): HarmonicSegment {
   const segmentEvidence = collectSegmentEvidence(segment);
-  const regionEvidence = getRegionEvidence(segmentEvidence);
-  const regions = buildRegions(regionEvidence);
+  const fieldEvidence = getFieldEvidence(segmentEvidence);
+  const fields = buildFields(fieldEvidence);
   const center = buildCenter(
     segmentEvidence.eventPitchClasses,
     segmentEvidence.guidancePitchClasses,
-    regions,
+    fields,
   );
-  const grounding = getGrounding(center, segmentEvidence, regions);
+  const grounding = getGrounding(center, segmentEvidence, fields);
 
   return {
     center,
+    fields,
     ...(grounding === undefined ? {} : { grounding }),
-    regions,
   };
 }
 

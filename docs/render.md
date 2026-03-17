@@ -32,7 +32,7 @@ In the current code, that shape is `Placement`, which currently contains:
 
 - `minPitch` and `maxPitch` for the visible pitch range
 - ordered segments
-- for each segment: non-wrapping harmonic `regions`, `centerPitchClasses`, optional `grounding`, `positionedEvents`, and `totalDuration`
+- for each segment: non-wrapping harmonic `fields`, `centerPitchClasses`, optional `grounding`, `positionedEvents`, and `totalDuration`
 
 Placement is responsible for:
 
@@ -41,7 +41,7 @@ Placement is responsible for:
 - inferring local offsets when they are not authored explicitly
 - preserving simultaneity
 - preserving rests
-- carrying regions, center material, and grounding forward for rendering
+- carrying fields, center material, and grounding forward for rendering
 - determining the local pitch range used for rendering
 
 Placement turns canonical input plus harmonic structure into a placed result. It is not rendering.
@@ -52,7 +52,7 @@ The current placement stage:
 2. computes event offsets layer by layer when offsets are not explicitly authored
 3. preserves durations and simultaneities in the resulting positioned events
 4. assigns a local rest pitch from the middle of the visible range
-5. carries forward non-wrapping harmonic regions, center pitch classes, and optional grounding
+5. carries forward non-wrapping harmonic fields, center pitch classes, and optional grounding
 6. emits placement as the unified structure consumed by the renderer
 
 ## Rendering
@@ -74,7 +74,7 @@ It currently:
 
 1. establishes score geometry from the placement pitch range and segment count
 2. draws a background grid and segment boundaries
-3. renders regions as background blocks across the visible pitch range
+3. renders fields as background blocks across the visible pitch range
 4. renders center material as horizontal marks across the visible pitch range
 5. renders grounding as distinct root and ground marks
 6. renders events from positioned offsets and durations

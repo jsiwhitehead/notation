@@ -20,7 +20,7 @@ This section covers the shared models and contracts that connect authored input,
 
 This section covers harmonic engine behavior.
 
-- refine region derivation
+- refine field derivation
 - refine center selection
 - improve fallback grounding inference
 - define how implied harmonic support such as probable fifth completion should appear
@@ -63,7 +63,7 @@ This section covers placement behavior.
 This section covers rendering.
 
 - separate renderer concerns from placement concerns more sharply where needed
-- improve legibility of duration, rests, harmonic regions, center material, and grounding
+- improve legibility of duration, rests, harmonic fields, center material, and grounding
 - preserve the current simple renderer as a baseline while introducing one richer rendering
 - add stronger cross-segment harmonic-shape rendering
 - add more notation-like glyph rendering
