@@ -1,6 +1,251 @@
 # Music Notation Rendering Research
 
-Research into VexFlow, LilyPond, Verovio, MuseScore, and the SMuFL/Bravura specification. Extracted for application to this system. Stave-specific conventions are noted where they require adaptation.
+Research into VexFlow, LilyPond, Verovio, MuseScore, GUIDOLib, and related systems and standards. Synthesised for application to this system's event rendering layer. Stave-specific conventions are noted where adaptation is required.
+
+---
+
+## Contents
+
+1. [Architecture and Design Philosophy](#architecture-and-design-philosophy)
+2. [Field Arc of Learning and Frontiers](#field-arc-of-learning-and-frontiers)
+3. [Sources](#sources)
+4. [SMuFL — The Universal Glyph Standard](#smufl--the-universal-glyph-standard)
+5. [Noteheads](#noteheads)
+6. [Stems](#stems)
+7. [Flags](#flags)
+8. [Beams](#beams)
+9. [Multi-voice and Polyphony](#multi-voice-and-polyphony)
+10. [Rests](#rests)
+11. [Augmentation Dots](#augmentation-dots)
+12. [Accidentals](#accidentals)
+13. [Ties and Slurs](#ties-and-slurs)
+14. [Tuplets](#tuplets)
+15. [Horizontal Spacing](#horizontal-spacing)
+16. [Articulations](#articulations)
+17. [Dynamics](#dynamics)
+18. [Key Constants Reference](#key-constants-reference)
+19. [Testing, Performance, and Determinism](#testing-performance-and-determinism)
+20. [Adaptation Notes for This System](#adaptation-notes-for-this-system)
+
+---
+
+## Architecture and Design Philosophy
+
+This section synthesises the high-level structural patterns that consistently appear across all mature notation systems. These are the most transferable lessons — not algorithm specifics, but architectural commitments.
+
+### The three-model separation
+
+Every serious notation engine separates at least three concerns:
+
+1. **Semantic model** — what the music *means*: pitches, durations, voices, phrasing intent
+2. **Layout / engraving model** — how elements are positioned: glyphs, stems, beams, collision-avoided offsets, bounding boxes, anchors
+3. **Drawing model** — actual output commands: SVG paths, canvas calls, PostScript
+
+Layout objects are not semantic objects (they don't know what chord they represent), and they are not drawing commands (they don't know about SVG). The layout layer is the "engraved geometry."
+
+| System       | Semantic model                      | Layout model                          | Drawing model        |
+| ------------ | ----------------------------------- | ------------------------------------- | -------------------- |
+| LilyPond     | Music expressions / contexts        | Grobs (graphical objects)             | Stencils             |
+| Verovio      | MEI document tree                   | Positioned elements + functor results | SVG drawing functor  |
+| VexFlow      | Notes / voices / stave items        | TickContexts / ModifierContexts       | SVG / Canvas context |
+| GUIDO        | AR (Abstract Representation)        | GR (Graphic Representation)           | Drawing device       |
+| This system  | Authored events + harmonic analysis | *[target: engraved geometry layer]*   | SVG renderer         |
+
+Do not let render-time geometry leak backward into the musical model; do not let musical inference happen in the renderer.
+
+### GUIDO: the AR→GR pattern
+
+GUIDO makes the semantic/layout separation the explicit design principle. The Abstract Representation (AR) is a tree of score objects with musical semantics. The GR conversion produces a distinct tree of Graphic Representation objects with concrete positions, bounding boxes, and drawing instructions. Crucially the GR layer is a new data structure — not an in-place mutation of AR.
+
+Mapping onto this system:
+- **AR equivalent**: engine output (harmonic structure, events with pitch/duration/voice)
+- **GR equivalent**: engraved events (glyph IDs, x/y positions, stem rects, beam polygons, anchors, collision shapes)
+- **Drawing**: renderer consumes GR, emits SVG
+
+### LilyPond: grobs and stencils
+
+LilyPond's full pipeline:
+
+1. **Music expressions** — pitches, durations, logical structure (Scheme data)
+2. **Contexts** (Score → Staff → Voice) — hierarchical processing containers
+3. **Engravers** — convert music expressions into graphical objects (grobs)
+4. **Grobs** — layout objects with lazily-evaluated properties
+5. **Stencils** — actual drawing instructions
+
+Properties are computed via callbacks on demand. A stem's direction is only computed when requested, allowing later stages to influence earlier decisions without re-running the full pipeline. This lazy evaluation is key to managing interdependent layout decisions.
+
+### Verovio: functor visitor passes
+
+All layout passes are independent functors that traverse the object tree in sequence:
+
+- `CalcStemFunctor` — stem directions and lengths
+- `CalcBeamFunctor` — beam slopes and positions
+- `CalcSlurFunctor` — slur control points
+- `CalcAccidsFunctor` — accidental stacking
+- `AdjustDotsFunctor` — dot vertical positioning
+- `HorizontalAligner` — x-coordinate assignment
+- `SpacingFunctor` — proportional spacing
+
+Each functor is a single focused pass, easy to reason about in isolation and to reorder when needed.
+
+### VexFlow: TickContexts and ModifierContexts
+
+A **TickContext** groups all notes at the same beat position across all voices. Spacing is computed once per tick context, not per note. A **ModifierContext** groups all modifiers (accidentals, dots, articulations) for all notes at the same tick and formats them in a fixed sequence.
+
+`Formatter.format()` phases:
+
+1. `preFormat()` — calculate width for each tickable and its modifiers
+2. `postFormat()` — position all contexts horizontally using softmax spacing
+3. Apply final positions to stave elements
+
+### Pass-based layout: the canonical order
+
+All mature systems decompose layout into focused sequential passes. Each pass assumes prior passes are complete. The canonical dependency order:
+
+1. **Rhythmic grouping** — identify beat groups, beam candidates, meter context
+2. **Core note / chord / rest shaping** — choose notehead glyphs, stem direction, flag count
+3. **Stem geometry** — compute lengths and attachment points via SMuFL anchors
+4. **Beam grouping and slope** — compute beam polygons, adjust per-note stem tips
+5. **Modifier measurement** — measure accidentals, dots, articulations; assign to columns
+6. **Horizontal spacing** — assign x-positions using duration-proportional spacing + hard minima from modifier widths
+7. **Tie / slur shaping** — initial control point placement
+8. **Collision resolution** — adjust spanners, articulations, outside-staff items; stack as needed
+9. **Text / dynamics** — position last (depend on everything else for clearance)
+10. **Drawing** — consume completed layout objects, emit SVG
+
+Step 5 (modifier measurement) must precede step 6 (spacing); step 6 must precede step 7 (spanners); everything must precede step 10. This ordering is a dependency DAG, not a convention.
+
+### Candidate scoring for hard layout decisions
+
+LilyPond's most transferable idea: for decisions where the right answer depends on many interacting constraints, **generate plausible candidates and score them** rather than encoding all rules as a deterministic if-else tree.
+
+- **Beam slope**: both VexFlow (iterate slope values with a cost function) and LilyPond (penalty-weighted quantised position search) use this
+- **Slur control points**: LilyPond scores slur configurations against penalties for collisions, staff-line proximity, and shape quality
+- **Beam quantisation**: LilyPond avoids beams straddling staff lines by scoring positions against preferred types (inter, sit, hang, straddle)
+
+Pattern: enumerate positions or slopes within a search range → compute an ugliness score for each → pick the minimum. The score encodes hard constraints (via high penalties) and soft preferences (via lower penalties). When you encounter an edge case, you add a new penalty term — not a new branch in an if-else tree.
+
+### Layout objects data model
+
+A robust engraved-geometry layer needs these object types:
+
+**EngravedGlyph**
+```ts
+{ glyphName: string, codepoint: number, x: number, y: number, scale: number, bbox: Rect, anchors: SMuFLAnchors }
+```
+One drawn glyph — notehead, rest, accidental, flag, articulation. Position and size sourced from SMuFL metadata.
+
+**NoteCore**
+```ts
+{ notehead: EngravedGlyph, stem?: StemRect, flag?: EngravedGlyph, voice: number, eventRef: EventId }
+```
+A notehead with its stem and optional flag. Position is fixed before modifiers are computed. Corresponds to VexFlow's "tickable" — the core positioned element that modifiers attach to.
+
+**ModifierColumn**
+```ts
+{ side: 'left' | 'right' | 'above' | 'below', items: EngravedGlyph[], totalWidth: number }
+```
+Accidentals stack left; dots right; articulations above/below. Each column is measured before spacing runs so spacing can respect modifier widths.
+
+**BeamGroup**
+```ts
+{ notes: NoteCore[], slope: number, yIntercept: number, beamLines: BeamLine[], perNoteStemTips: number[] }
+```
+Computed by the beam sub-engine after note positions are fixed. Contains the beam polygon(s) and per-note adjusted stem endpoints.
+
+**Spanner**
+```ts
+{ type: 'tie' | 'slur' | 'hairpin', startRef: EventId, endRef: EventId, controlPoints: Point[], direction: 'above' | 'below' }
+```
+Curves with collision-adjusted control points. Computed last so the collision scan sees all notes, beams, and articulations.
+
+**CollisionShape**
+```ts
+{ type: 'bbox' | 'skyline', bounds: Rect | SkylineProfile }
+```
+Every engraved object exports a collision shape. Start with bounding boxes; upgrade to skyline profiles when element density demands it.
+
+### SVG layer ordering
+
+Paint order, bottom-to-top (later elements visually on top):
+
+1. Background, filled regions (harmonic spans)
+2. Staff lines, ledger lines
+3. Noteheads
+4. Stems
+5. Beams
+6. Flags
+7. Dots, accidentals, articulations
+8. Ties, slurs — always above other note elements
+9. Text labels, dynamics, chord symbols, annotations
+
+### SVG precision and coordinates
+
+VexFlow renders to 3 decimal places (`RENDER_PRECISION_PLACES = 3`). Coordinates use internal pen state (pen.x, pen.y) in screen coordinates (Y increases downward). Scaling via SVG `viewBox`, not CSS transforms. All paths use moveTo / lineTo / bezierCurveTo / arc primitives.
+
+### Integration blueprint for this system
+
+Two viable options for adding engraved event geometry:
+
+**Option A — extend projection to emit engraved geometry (recommended if renderer stays thin)**
+
+Projection already owns pitch-space placement. Extend it to also compute glyph IDs, stem rects, beam polygons, modifier columns, and collision shapes. Renderer becomes a thin "draw what you're given" layer. Mirrors the GUIDO AR→GR step.
+
+*Trade-off:* engraving style parameters (font choice, beam policy, slope limits) become projection configuration. Clean architecture; projection grows.
+
+**Option B — insert a dedicated engraving stage between projection and renderer**
+
+Projection emits musical placements (pitch-row + time coordinates, voice assignments). A new engraving stage converts those to glyph geometry using SMuFL metadata and engraving defaults. Renderer remains thin.
+
+*Trade-off:* an additional pipeline stage, but enables multiple renderers (SVG, canvas, PDF, interactive) consuming the same engraved output without re-engraving.
+
+In both options, the engraving layer consumes event pitch-row positions, event durations and voices, and SMuFL metadata; and emits the layout object graph plus a layer-ordered draw list.
+
+---
+
+## Field Arc of Learning and Frontiers
+
+### The arc: from approximate placement to principled layout
+
+The clearest overall arc in digital notation: the field has moved from placing symbols at approximate positions toward encoding musical intent, deriving layout objects, and solving placement through a mixture of hard constraints and scored heuristics against a standardised glyph and metric system.
+
+Key milestones:
+
+1. **Shared glyph standards** — SMuFL established a universal vocabulary plus anchor metadata, ending the era of per-system font assumptions. MuseScore 4.6 added support for any SMuFL-compliant music font; Verovio, VexFlow, and OSMD all converged on Bravura/SMuFL.
+
+2. **Cleaner architecture** — all mature systems converged on the three-model separation (semantic → layout → drawing). This was implicit in early systems; it is now explicit and enforced by module boundaries.
+
+3. **Better collision and spacing models** — from ad hoc bounding-box checks to skyline profiles (LilyPond), shared modifier contexts (VexFlow), and iterative constraint solving (MuseScore). MuseScore 4.0 listed substantial improvements to beams, slurs, ties, horizontal spacing, and page layout as its flagship engraving improvements.
+
+4. **Attachment semantics** — mature systems now track *what* a marking is attached to, at what rhythmic scope, and with what reflow behaviour. MuseScore 4.4 introduced arbitrary rhythmic anchor points: dynamics and text can attach to beat subdivisions and remain stable across layout changes. Earlier versions only supported note/rest attachment.
+
+5. **Interoperability** — MusicXML, MEI, and now MNX have become part of the shared infrastructure. Verovio's importance is partly as a conversion hub (MEI, MusicXML, Humdrum, ABC → SVG). Interchange is no longer an afterthought.
+
+### Seven key learnings
+
+1. **Three-model separation is essential.** The harmonic/musical model must not become the glyph model; the glyph model must not become the SVG model.
+
+2. **Standard glyph metadata is the single biggest quality lever.** Using SMuFL anchors and advance widths instead of guessed geometry is the difference between approximation and professional placement.
+
+3. **Organise layout as focused passes.** Separating rhythmic grouping, note shaping, stem/beam geometry, modifier measurement, spacing, spanners, collision, and drawing is the strongest cross-system agreement. Ad hoc "do everything at once" approaches consistently produce fragile code.
+
+4. **Use mixed strategies: rules + scored optimisation.** Use deterministic rules for things that are always the same (voice 1 stems up, dots in spaces). Use scored candidate search for things that depend on local context (beam slope, slur shape). LilyPond's ugliness scoring, VexFlow's slope cost function, and MuseScore's iterative slur adjustment are all expressions of the same insight.
+
+5. **Collision handling needs shared infrastructure.** Once you have beams, rests, ties, articulations, and text, per-symbol collision hacks become unmaintainable. A skyline abstraction or at least reusable occupied-profile geometry is worth building early. LilyPond's skyline primitives are the most mature reference; VexFlow's modifier contexts are the most pragmatic starting point.
+
+6. **Attachment semantics before you need them.** Knowing *what* a symbol is attached to, at what rhythmic granularity, and with what reflow behaviour is more important than the symbol's visual properties. Systems that didn't build this early had to do expensive retrofits.
+
+7. **Manual overrides should sit on top of good defaults.** Improving defaults in MuseScore 4.0 invalidated old manual adjustments — exactly what happens when defaults were previously weak. Strong automatic placement first; store small user deltas relative to computed anchors.
+
+### Active frontiers
+
+**MNX interchange format** — the W3C Music Notation Community Group is still actively refining MNX. Core concepts like beaming semantics and full-measure rest representation are still being debated as of 2025–2026. The field has not fully converged on encoding engraving intent independently of appearance.
+
+**Non-standard staves** — MEI explicitly supports notation beyond the five-line staff, but most engraving engines assume traditional staff geometry. How much of traditional engraving logic should remain invariant when the stave is custom is an open problem. This system is a direct example of this frontier.
+
+**Beat-subdivision attachment** — MuseScore 4.4's arbitrary beat anchor points are a leading example of a still-evolving area. For a harmonic notation system, anchors tied to segment subdivisions, harmonic spans, and analysis objects will be at least as important as note-attached anchors.
+
+**Quality at scale in interactive environments** — LilyPond's engraving quality comes partly from the freedom to spend more time on batch layout. VexFlow and Verovio prioritise responsiveness and portability. MuseScore must balance real-time editing, playback, and professional output. The best design choice depends on whether this system is primarily an editor, a renderer, or a batch engraver.
 
 ---
 
@@ -9,6 +254,7 @@ Research into VexFlow, LilyPond, Verovio, MuseScore, and the SMuFL/Bravura speci
 ### VexFlow
 
 Repository: https://github.com/0xfe/vexflow
+License: MIT
 
 Key source files consulted:
 
@@ -28,6 +274,7 @@ Key source files consulted:
 ### LilyPond
 
 Repository: https://gitlab.com/lilypond/lilypond
+License: GPL 3 (study algorithms; do not copy code)
 
 Key source files consulted:
 
@@ -51,6 +298,7 @@ Documentation consulted:
 ### Verovio
 
 Repository: https://github.com/rism-digital/verovio
+License: LGPLv3
 
 Key source files consulted:
 
@@ -69,6 +317,7 @@ Key source files consulted:
 ### MuseScore
 
 Repository: https://github.com/musescore/MuseScore
+License: GPL 3 (study algorithms; do not copy code)
 
 Key source directories:
 
@@ -81,7 +330,55 @@ Documentation:
 - MuseScore 4.0 engraving improvements: https://musescore.org/en/node/330793
 - MuseScore Studio 4.4 engraving improvements: https://musescore.org/en/node/366024
 
-_(Not deeply researched yet — `src/engraving/` is the entry point for future investigation.)_
+*(Not deeply researched yet — `src/engraving/` is the entry point for future investigation.)*
+
+### GUIDOLib
+
+Repository: https://github.com/grame-cncm/guidolib
+License: Mozilla Public License 2.0 (MPL 2.0)
+
+Explicitly separates Abstract Representation (AR) from Graphic Representation (GR) — the clearest expression of the semantic→layout→drawing pattern across all open-source systems. Long academic lineage around spacing and layout algorithms (see Kai Renz's comparative spacing research).
+
+### OpenSheetMusicDisplay (OSMD)
+
+Repository: https://github.com/opensheetmusicdisplay/opensheetmusicdisplay
+License: BSD 3-Clause
+
+TypeScript. Acts as a MusicXML → internal model → VexFlow pipeline. Useful reference for system-level concerns (pagination, system breaks) and for what is needed to bridge a real interchange format to rendered notation.
+
+### abcjs
+
+Repository: https://github.com/paulrosen/abcjs
+License: MIT
+
+Browser-based ABC notation engraver. Maintainers describe an explicit split between "layout" and "writing to SVG". Useful as a compact end-to-end reference: parse → layout → SVG write. Requires a live DOM for spacing (browser text measurement), which has implications for determinism and server-side rendering.
+
+### abcm2ps / abc2svg
+
+- abcm2ps: https://moinejf.free.fr/
+- abc2svg: https://chiselapp.com/user/moinejf/repository/abc2svg/
+
+ABC-to-PostScript/SVG tools with automatic beaming and practical engraving conventions. Useful for alternative beaming and spacing implementations, though the font model differs from SMuFL-centric systems.
+
+### Lomse
+
+Repository: https://github.com/lenmus/lomse
+License: MIT
+
+C++ library designed for embedding notation rendering in other applications. SVG output, SMuFL-based fonts, editing/playback hooks. Good reference for "library-first" API boundaries.
+
+### W3C Music Notation Community Group / MNX
+
+- W3C group: https://www.w3.org/community/music-notation/
+- MNX spec (in progress): https://w3c.github.io/mnx/
+
+Maintains MusicXML and SMuFL. Developing MNX, a next-generation interchange format. Beaming semantics, full-measure rest representation, and sequence structure are still actively debated as of 2025–2026 — the field has not fully converged on encoding engraving intent independently of appearance.
+
+### MEI (Music Encoding Initiative)
+
+Repository: https://github.com/music-encoding/music-encoding
+
+XML-based interchange format explicitly supporting notation beyond common Western notation. Rendered by Verovio. Useful for understanding how scholarly systems handle non-standard staves and the distinction between "notation as semantics" vs. "notation as appearance."
 
 ### SMuFL specification
 
@@ -97,60 +394,55 @@ Sections consulted:
 ### Bravura font metadata
 
 Repository: https://github.com/steinbergmedia/bravura
+License: SIL Open Font License (OFL)
 
 Key files:
 
 - `redist/bravura_metadata.json` — all `glyphsWithAnchors` values (stem anchor coordinates), `engravingDefaults` values, `glyphAdvanceWidths`, glyph bounding boxes
 
----
+### License summary
 
-## Contents
+| System                  | License      | Notes                                                                      |
+| ----------------------- | ------------ | -------------------------------------------------------------------------- |
+| VexFlow                 | MIT          | Can study and adapt freely                                                 |
+| abcjs                   | MIT          | Can study and adapt freely                                                 |
+| Lomse                   | MIT          | Can study and adapt freely                                                 |
+| OpenSheetMusicDisplay   | BSD 3-Clause | Can study and adapt freely                                                 |
+| Verovio                 | LGPLv3       | Can link as library; clean-room reimplementation required for copying code |
+| GUIDOLib                | MPL 2.0      | Weak copyleft; study and clean-room reimplementation safe                  |
+| LilyPond                | GPL 3        | Copyleft — study algorithms, do not copy code                              |
+| MuseScore (engraving)   | GPL 3        | Same as LilyPond — study algorithms, do not copy code                     |
+| Bravura font            | SIL OFL      | Can embed and redistribute with OFL compliance                             |
 
-1. [SMuFL — the universal glyph standard](#smufl--the-universal-glyph-standard)
-2. [Noteheads](#noteheads)
-3. [Stems](#stems)
-4. [Flags](#flags)
-5. [Beams](#beams)
-6. [Rests](#rests)
-7. [Augmentation dots](#augmentation-dots)
-8. [Accidentals](#accidentals)
-9. [Ties and slurs](#ties-and-slurs)
-10. [Tuplets](#tuplets)
-11. [Horizontal spacing](#horizontal-spacing)
-12. [Multi-voice / polyphony](#multi-voice--polyphony)
-13. [Articulations](#articulations)
-14. [Dynamics](#dynamics)
-15. [Rendering architecture](#rendering-architecture)
-16. [Key constants reference](#key-constants-reference)
-17. [Adaptation notes for this system](#adaptation-notes-for-this-system)
+Safe pattern: learn algorithms from all sources; reimplement clean-room; embed Bravura under OFL.
 
 ---
 
-## SMuFL — the universal glyph standard
+## SMuFL — The Universal Glyph Standard
 
-All four systems (VexFlow, LilyPond, Verovio, MuseScore) use the **Bravura** font with **SMuFL** Unicode codepoints. The key principle: every glyph has defined **anchor points** in `bravura_metadata.json` that specify exactly where to attach stems, where ledger lines clip, where ties originate. Using this metadata vs. guessing positions is the difference between professional-quality output and approximation.
+All major systems (VexFlow, LilyPond, Verovio, MuseScore) use the **Bravura** font with **SMuFL** Unicode codepoints. The key principle: every glyph has defined **anchor points** in `bravura_metadata.json` that specify exactly where to attach stems, where ledger lines clip, where ties originate. Using this metadata vs. guessing positions is the difference between professional-quality output and approximation.
 
 ### Coordinate system
 
-SMuFL coordinates are expressed in **staff spaces** — the distance between adjacent staff lines. This is the universal unit across all notation systems. Y increases upward (Cartesian), which is the opposite of screen/SVG coordinates.
+SMuFL coordinates are expressed in **staff spaces** — the distance between adjacent staff lines. This is the universal unit across all notation systems.
 
-One staff space = 0.25 em at the font design size. For Bravura at 1000 upm, one staff space = 250 units.
+- Y increases **upward** (Cartesian), which is the opposite of screen/SVG coordinates
+- One staff space = **0.25 em** at the font design size
+- For Bravura at 1000 upm, one staff space = 250 units
 
 ### Glyph anchor points
 
 The `glyphsWithAnchors` section of `bravura_metadata.json` defines attachment points for each glyph. All coordinates are in staff spaces relative to the glyph origin.
 
-Key anchors:
-
-| Anchor                      | Semantics                                                                                       |
-| --------------------------- | ----------------------------------------------------------------------------------------------- |
-| `stemUpSE`                  | Bottom-right corner of an up-stem rectangle — where the stem meets the notehead when stem is up |
-| `stemDownNW`                | Top-left corner of a down-stem rectangle — where the stem meets the notehead when stem is down  |
-| `stemUpNW`                  | Used on flag glyphs: amount by which stem must be lengthened for flag connection on up-stems    |
-| `stemDownSW`                | Used on flag glyphs: stem-lengthening amount for flag connection on down-stems                  |
-| `nominalWidth`              | Width for precise positioning (e.g. ledger lines)                                               |
-| `opticalCenter`             | Optical center for alignment (especially dynamics)                                              |
-| `graceNoteSlashSW/NE/NW/SE` | Grace note slash positioning                                                                    |
+| Anchor           | Semantics                                                                                       |
+| ---------------- | ----------------------------------------------------------------------------------------------- |
+| `stemUpSE`       | Bottom-right corner of an up-stem rectangle — where the stem meets the notehead when stem is up |
+| `stemDownNW`     | Top-left corner of a down-stem rectangle — where the stem meets the notehead when stem is down  |
+| `stemUpNW`       | Used on flag glyphs: amount by which stem must be lengthened for flag connection on up-stems    |
+| `stemDownSW`     | Used on flag glyphs: stem-lengthening amount for flag connection on down-stems                  |
+| `nominalWidth`   | Width for precise positioning (e.g. ledger lines)                                               |
+| `opticalCenter`  | Optical center for alignment (especially dynamics)                                              |
+| `graceNoteSlash` | Grace note slash positioning (four variants: SW/NE/NW/SE)                                      |
 
 Example from Bravura metadata:
 
@@ -161,7 +453,7 @@ Example from Bravura metadata:
 }
 ```
 
-When stem is up, attach at x=1.328, y=0.184 staff spaces from the notehead origin. When stem is down, attach at x=0.0, y=-0.184.
+When stem is up: attach at x=1.328, y=0.184 staff spaces from the notehead origin. When stem is down: attach at x=0.0, y=-0.184.
 
 ### engravingDefaults (Bravura values, all in staff spaces)
 
@@ -226,7 +518,6 @@ When stem is up, attach at x=1.328, y=0.184 staff spaces from the notehead origi
 - `U+E4A4/E4A5` — tenutoAbove / tenutoBelow
 - `U+E4A6/E4A7` — staccatissimoAbove / staccatissimoBelow
 - `U+E4AC/E4AD` — marcatoAbove / marcatoBelow
-- `U+E4AE/E4AF` — marcatoStaccatoAbove / marcatoStaccatoBelow
 - `U+E4B0/E4B1` — accentStaccatoAbove / accentStaccatoBelow
 - `U+E4B2/E4B3` — tenutoStaccatoAbove / tenutoStaccatoBelow
 - `U+E4C0/E4C1` — fermataAbove / fermataBelow
@@ -259,11 +550,23 @@ When stem is up, attach at x=1.328, y=0.184 staff spaces from the notehead origi
 | rest8th           | 1.0   |
 | rest16th          | 1.28  |
 
+### Rendering SMuFL glyphs in SVG (two approaches)
+
+**Option A — SVG `<text>` with embedded WOFF/WOFF2 font**
+
+Embed Bravura as a WOFF2 web font via `@font-face`. Render each glyph as a `<text>` element with the appropriate Unicode codepoint. Hinting and anti-aliasing are handled by the browser. Glyph positions and sizes must still be computed from `bravura_metadata.json` — never from DOM measurement.
+
+**Option B — Convert glyphs to path outlines and cache them**
+
+Use a font parser (e.g. `opentype.js`) to extract glyph outlines as SVG path data at build time. Render as `<path>` elements. Fully DOM-independent — works server-side, in Workers, and in test environments without a browser. Requires a one-time build step.
+
+Either approach works. The critical requirement in both cases: **measure and position using SMuFL metadata, never by eyeballing or DOM measurement**. All mature systems derive advance widths, bounding boxes, and anchor coordinates from the font metadata file, not from runtime font measurement.
+
 ---
 
 ## Noteheads
 
-### Notehead types by duration
+### Types by duration
 
 | Duration             | Glyph               | Filled | Has stem    |
 | -------------------- | ------------------- | ------ | ----------- |
@@ -272,7 +575,7 @@ When stem is up, attach at x=1.328, y=0.184 staff spaces from the notehead origi
 | Half                 | noteheadHalf        | Open   | Yes         |
 | Quarter and shorter  | noteheadBlack       | Filled | Yes         |
 
-### Notehead sizing
+### Sizing
 
 Font scaling formula (VexFlow):
 
@@ -302,7 +605,7 @@ LilyPond displacement amounts by collision type:
 - Distant half (adjacent, reversed direction): `0.65 × notehead width`
 - Touch (extreme notes just contact): `0.5 × notehead width`
 
-### Notehead merging (unison in multi-voice)
+### Notehead merging at unison
 
 Notes at the same pitch in different voices can share a notehead only when:
 
@@ -344,11 +647,9 @@ if upDist > downDist: direction = DOWN
 // tie-breaker: DOWN
 ```
 
-**Multi-voice convention (universal, non-negotiable):** Voice 1 = stems UP. Voice 2 = stems DOWN.
+**Multi-voice convention (universal, non-negotiable):** Voice 1 = stems UP. Voice 2 = stems DOWN. For three voices, the middle voice yields to beamed notes in adjacent voices; un-beamed notes adjust direction to resolve conflicts.
 
-For three voices: the middle voice yields to beamed notes in adjacent voices; un-beamed notes adjust direction to resolve conflicts with beamed groups.
-
-### Stem length
+### Length
 
 Default: **3.5 staff spaces** (7 half-spaces). Consistent across LilyPond, VexFlow, Verovio.
 
@@ -359,7 +660,7 @@ Length array by flag count (staff spaces):
 [3.5,    3.5, 3.5, 4.25, 5.0, 6.0, 7.0, 8.0, 9.0]
 ```
 
-Extension for extreme notes: when a note is more than 3.5 staff spaces (approximately one octave) from the staff center, extend the stem by the overshoot amount:
+Extension for extreme notes — when a note is more than 3.5 staff spaces from the staff center, extend the stem by the overshoot:
 
 ```
 if |notePos - staffCenter| > 3.5:
@@ -384,7 +685,7 @@ Beamed stem base lengths (half-spaces, from Verovio):
 | 128th    | 24–26       |
 | 256th    | 28–30       |
 
-### Stem attachment to noteheads
+### Attachment to noteheads
 
 Use SMuFL anchor data directly:
 
@@ -395,7 +696,7 @@ For noteheadBlack: `stemUpSE = [1.328, 0.184]`, `stemDownNW = [0.0, -0.184]` (st
 
 **Stem width:** `0.12` ss (SMuFL spec). VexFlow uses `1.5px` at 10px/ss.
 
-### Stem extension for flags
+### Flag extension
 
 Extra stem length needed to accommodate multiple flag glyphs (VexFlow values at 10px/ss):
 
@@ -415,17 +716,16 @@ Scale to 0.75× of normal stem length.
 
 ## Flags
 
-### Flag glyph placement
+### Placement
 
-The flag glyph's origin (x=0, y=0) is positioned at the **stem tip**. For up-stems, the flag curves downward from the stem tip. For down-stems, it extends upward.
+The flag glyph's origin (x=0, y=0) is positioned at the **stem tip**. For up-stems the flag curves downward from the stem tip; for down-stems it extends upward.
 
 A small horizontal shift centers the flag on the stem: VexFlow applies `shiftX = -0.75` units.
 
-### Flag extents (Bravura)
+### Extents (Bravura)
 
-flag8thUp extends approximately 3.24 staff spaces **downward** from the stem tip (the visual curve sweeping down toward the notehead).
-
-flag8thDown extends approximately 3.23 staff spaces **upward** from the stem tip.
+- `flag8thUp` extends approximately **3.24 staff spaces downward** from the stem tip (the visual curve sweeping toward the notehead)
+- `flag8thDown` extends approximately **3.23 staff spaces upward** from the stem tip
 
 ### Flags suppressed by beams
 
@@ -442,9 +742,9 @@ When a note belongs to a beam group, its flag glyph is **not rendered**. The bea
 - Grouping follows the beat structure of the time signature
 - First and last notes of a beam group must be eligible (no quarter+ notes can be beam endpoints)
 
-### Beam slope — the VexFlow algorithm
+### Slope — VexFlow algorithm
 
-The definitive approach from VexFlow source:
+The definitive approach from `src/beam.ts`:
 
 ```
 rawSlope = (lastStemTipY - firstStemTipY) / (lastX - firstX)
@@ -478,7 +778,7 @@ for slope in range(min_slope, max_slope, step=(max_slope-min_slope)/iterations):
 
 Key insight: the ideal slope is **half** the raw slope from first to last note. `slope_cost = 100` strongly penalizes deviation from this, while `totalStemExtension` penalizes excessive stem adjustment.
 
-### Beam slope — LilyPond penalty model
+### Slope — LilyPond penalty model
 
 LilyPond searches quantized beam positions and scores them with penalty weights:
 
@@ -501,7 +801,7 @@ Preferred beam positions relative to staff lines (best to worst):
 3. **Hang** — beam hanging from bottom of a line
 4. **Straddle** (0.0) — beam crossing through a line (generally avoided)
 
-### Beam thickness and secondary beams
+### Thickness and secondary beams
 
 - Primary beam thickness: **0.5 staff spaces** (universal across all systems)
 - Gap between outer edges of adjacent beams: beamThickness + `0.25` ss gap = `0.75` ss outer-to-outer
@@ -526,7 +826,7 @@ Each note shorter than an 8th has secondary beams in addition to the primary. A 
 - `BEAM_LEFT` — partial beam extending leftward from the note
 - `BEAM_RIGHT` — partial beam extending rightward
 
-Break points are governed by the rhythmic grouping (typically at beat boundaries). Partial beam length ≈ 1 staff space (10px at 10px/ss in VexFlow).
+Break points are governed by rhythmic grouping (typically at beat boundaries). Partial beam length ≈ 1 staff space (10px at 10px/ss in VexFlow).
 
 ### Beams over rests
 
@@ -543,11 +843,68 @@ Alternative policy: `slope = 0`, beam offset = average of all stem tip positions
 
 When the gap between a beam group's highest and lowest notes exceeds **5.5 staff spaces**, the beam is a "kneed beam" — the beam bends to accommodate the large interval. LilyPond expands its search region and applies `× 10` to the IDEAL_SLOPE_FACTOR for cross-staff beams.
 
+### French beam style
+
+In French (or "French style") beaming, secondary beams do not attach to the primary beam on both sides of their note — instead, secondary beams float slightly off the stem tip. The primary beam remains a full horizontal bar, but sub-beams are shorter and positioned differently. Verovio exposes this as a `frenchStyle` option (`beamFrenchStyle`). It is a style toggle, not a different algorithm.
+
+### Beaming as a configurable sub-engine
+
+Beaming is best treated as its own sub-pipeline rather than an inline procedure. It consumes a sequence of positioned notes (x positions and y stem-tip positions already known) and outputs beam polygons plus per-note adjusted stem endpoints.
+
+All policy decisions should be **explicit configuration**, not hidden logic:
+
+- Group boundaries (where beams break — typically at beat boundaries)
+- Whether to beam across interior rests
+- Knee threshold (default 5.5 ss)
+- Slope limits (default ±0.25)
+- French style attachment (on/off)
+- Flat beam mode (on/off)
+
+This mirrors LilyPond's tunable beam parameters and Verovio's options surface. Hardcoding these assumptions will block you when you encounter notation that needs a different policy.
+
+---
+
+## Multi-voice and Polyphony
+
+### Voice stem conventions
+
+**Universal across all systems:**
+
+- Voice 1 = stems UP
+- Voice 2 = stems DOWN
+
+Three voices: middle voice yields to beamed notes in adjacent voices; un-beamed middle-voice notes adjust direction to resolve conflicts.
+
+### Notehead collision for seconds (across voices)
+
+When notes in the same chord are a second apart (including across voices), one displaces horizontally. The displacement side depends on which voice is above/below — typically the lower voice's notehead shifts right. The stem of the displaced note still originates from the correct side of its notehead.
+
+### Shared noteheads at unison
+
+Notes at the same pitch in different voices may share a notehead under strict conditions. Both stems attach to the shared notehead. Conditions:
+
+- Same head style
+- Same dot count
+- Same head type
+- Never quarter + half at unison
+- Never whole notes
+
+### Rest collision handling
+
+When rests from opposing voices occupy the same vertical region, they are displaced. Voice 1 rest moves upward; Voice 2 rest moves downward.
+
+Default offset positions:
+
+- Voice 1 rest: position 6 (or 8 for overlap with quarter notes)
+- Voice 2 rest: position 2
+
+The specific displacement amount depends on the rests' durations and the density of surrounding material.
+
 ---
 
 ## Rests
 
-### Rest glyphs by duration
+### Glyphs by duration
 
 | Duration      | SMuFL name      | Codepoint |
 | ------------- | --------------- | --------- |
@@ -562,9 +919,7 @@ When the gap between a beam group's highest and lowest notes exceeds **5.5 staff
 | 128th         | rest128th       | U+E4EA    |
 | Multi-measure | restHBar        | U+E4EE    |
 
-### Rest vertical positioning (stave context — adapt for custom layout)
-
-The canonical staff positions for rests:
+### Vertical positioning (stave context — adapt for custom layout)
 
 | Duration            | Default placement                   |
 | ------------------- | ----------------------------------- |
@@ -575,16 +930,7 @@ The canonical staff positions for rests:
 **Whole rest:** Top-heavy, like an inverted hat. The glyph **hangs** from the line above it.
 **Half rest:** Right-side-up hat. The glyph **sits** on the line below it.
 
-This whole/half distinction is important for recognition even outside traditional stave contexts.
-
-### Rest in polyphonic context
-
-Voice 1 rests (stems-up voice) float **upward** away from Voice 2. Voice 2 rests float **downward**. Default offset positions:
-
-- Voice 1 rest: position 6 (or 8 for overlap with quarter notes)
-- Voice 2 rest: position 2
-
-When rests from different voices would collide, they are displaced vertically. The upper-voice rest moves up; lower-voice moves down.
+This whole/half visual distinction is important for recognition even outside traditional stave contexts.
 
 ### Multi-measure rests
 
@@ -592,7 +938,7 @@ Use the `restHBar` glyph (U+E4EE), or draw a thick horizontal bar with thin vert
 
 ---
 
-## Augmentation dots
+## Augmentation Dots
 
 ### The fundamental rule
 
@@ -623,7 +969,7 @@ For chords, sort notes top-to-bottom and track which spaces already have dots. W
 
 ## Accidentals
 
-### Accidental glyphs
+### Glyph table
 
 | Symbol        | SMuFL name             | Codepoint |
 | ------------- | ---------------------- | --------- |
@@ -663,17 +1009,17 @@ For groups of 7+, the pattern repeats with `column = ((position % patternLength)
 
 **Unison accidentals:** Same pitch, same accidental type in different voices → superimposed, not separated.
 
-**Padding:** `0.2` staff spaces between accidental right edge and notehead left edge (LilyPond default).
+**Padding:** `0.2` staff spaces between accidental right edge and notehead left edge.
 
 ---
 
-## Ties and slurs
+## Ties and Slurs
 
-### Tie vs slur distinction
+### Tie vs. slur distinction
 
-**Tie:** Connects two notes of the **same pitch**, indicating they should sustain as one sound. Each note in a chord gets its own tie. Ties are thinner, shorter, and sit close to noteheads.
+**Tie:** connects two notes of the **same pitch**, indicating they sustain as one sound. Each note in a chord gets its own tie. Ties are thinner, shorter, and sit close to noteheads.
 
-**Slur:** Phrasing mark over notes of **different pitches**, indicating legato articulation. Larger and more prominent than ties.
+**Slur:** phrasing mark over notes of **different pitches**, indicating legato articulation. Larger and more prominent than ties.
 
 ### Direction rules (universal)
 
@@ -682,7 +1028,7 @@ Tie/slur goes **opposite** to stem direction:
 - Stem up → curve below the note
 - Stem down → curve above the note
 
-For chords: the top note's tie curves upward; the bottom note's tie curves downward; middle notes follow the same rules based on their individual stem context.
+For chords: the top note's tie curves upward; the bottom note's tie curves downward; middle notes follow their individual stem context.
 
 Single note with no stem context: default direction is up.
 
@@ -730,7 +1076,20 @@ Verovio models this as `SPANNING_START`, `SPANNING_END`, and `SPANNING_START_END
 
 ### Slur collision avoidance
 
-Slurs scan for collisions with: accidentals, articulations, noteheads, stems, tuplet brackets. When a collision is detected, the slur's control points are adjusted upward/downward to clear the obstacle. LilyPond applies penalty weights: accidental collision, general object collision, notehead clearance, nested slur clearance, staff-line avoidance.
+Slurs scan for collisions with: accidentals, articulations, noteheads, stems, tuplet brackets. When a collision is detected, the slur's control points are adjusted upward/downward to clear the obstacle.
+
+**LilyPond** generates candidate configurations and scores them against penalty weights: accidental collision, general object collision, notehead clearance, nested slur clearance, staff-line avoidance. The least-penalty candidate wins.
+
+**MuseScore** uses a concrete iterative adjustment routine:
+
+1. Compute initial Bézier control points from span and direction
+2. Sample the curve into a sequence of small rectangles
+3. Test each rectangle for intersection against collision targets (noteheads, stems, accidentals, articulations)
+4. If collision detected: adjust control points or shift endpoints, depending on where along the curve the collision occurs
+5. Repeat up to a fixed iteration cap (prevents infinite loops on unresolvable collisions)
+6. Use stable tie-breakers so small input changes produce small geometry changes
+
+**Key insight:** slur layout is not a closed-form calculation. It is a constrained search: start with a reasonable default, detect failures, adjust, repeat. The iteration cap and tie-breakers are what keep it stable in production.
 
 ---
 
@@ -752,21 +1111,22 @@ VexFlow values:
 - Number size: `(NOTATION_FONT_SCALE × 3) / 5`
 
 LilyPond bracket properties:
-| Property | Default | Meaning |
-|----------|---------|---------|
-| `edge-height` | 0.7 ss each end | Left and right vertical hook heights |
-| `padding` | 1.1 ss | Space between bracket and adjacent objects |
-| `thickness` | 1.6 (staff-line multiples) | Bracket line thickness |
-| `staff-padding` | 0.25 ss | Minimum distance from staff |
+
+| Property        | Default    | Meaning                               |
+| --------------- | ---------- | ------------------------------------- |
+| `edge-height`   | 0.7 ss     | Left and right vertical hook heights  |
+| `padding`       | 1.1 ss     | Space between bracket and adjacent objects |
+| `thickness`     | 1.6 (staff-line multiples) | Bracket line thickness  |
+| `staff-padding` | 0.25 ss    | Minimum distance from staff           |
 
 ### Bracket slope
 
 - VexFlow: always horizontal (no slope)
 - LilyPond: when the tuplet is attached to a beam, the bracket copies the beam's slope
 
-### When to omit bracket
+### When to omit the bracket
 
-Brackets are omitted when notes are **beamed** — the beam itself already implies the grouping. Only un-beamed tuplets need an explicit bracket.
+Brackets are omitted when notes are **beamed** — the beam already implies the grouping. Only un-beamed tuplets need an explicit bracket.
 
 ### Ratioed tuplets
 
@@ -774,7 +1134,7 @@ For "3 in the space of 2" style: render as `3:2` with a colon composed of two sm
 
 ---
 
-## Horizontal spacing
+## Horizontal Spacing
 
 ### Gourlay spring-rod model (LilyPond — the canonical approach)
 
@@ -826,9 +1186,22 @@ space = (intervalTime × 1024) ^ spacingNonLinear × spacingLinear × 10.0
 
 Both parameters are user-tunable.
 
-### ModifierContext layout order (VexFlow)
+### TickContext and ModifierContext grouping
 
-The sequence in which modifiers are laid out matters — each step assumes prior steps are complete:
+A **TickContext** groups all notes at the same beat position across all voices. Spacing is computed once per tick context, not per note. A **ModifierContext** groups all modifiers at the same tick and formats them in a fixed sequence. This two-level grouping keeps spacing logic manageable.
+
+**Tick context width formula:**
+
+```
+totalWidth = notePx
+           + max(modLeftPx + leftDisplacedHeadPx)
+           + max(modRightPx + rightDisplacedHeadPx)
+           + 2px padding
+```
+
+### Modifier layout order
+
+The sequence in which modifiers are measured and laid out matters — each step assumes prior steps are complete (VexFlow `ModifierContext`):
 
 1. Note itself
 2. Parentheses
@@ -840,22 +1213,9 @@ The sequence in which modifiers are laid out matters — each step assumes prior
 8. Annotations / chord symbols
 9. Bend, vibrato
 
-### TickContext / ModifierContext grouping
-
-A **TickContext** groups all notes at the same beat position across all voices. Spacing is computed once per tick context, not per note. A **ModifierContext** groups all modifiers (accidentals, dots, articulations) for all notes at the same tick. This two-level grouping keeps spacing logic manageable.
-
-### Tick context width
-
-```
-totalWidth = notePx
-           + max(modLeftPx + leftDisplacedHeadPx)
-           + max(modRightPx + rightDisplacedHeadPx)
-           + 2px padding
-```
-
 ### Skyline algorithm (LilyPond — collision avoidance at scale)
 
-Instead of O(n²) bounding-box checks, every element's silhouette is represented as a piecewise-linear **skyline** profile (top profile and bottom profile separately). Two opposing skylines can be compared in O(n) to find the minimum safe clearance.
+Instead of O(n²) bounding-box checks, every element's silhouette is represented as a piecewise-linear **skyline** profile (top and bottom profiles separately). Two opposing skylines can be compared in O(n) to find the minimum safe clearance.
 
 ```
 skyline = sequence of segments:
@@ -867,40 +1227,21 @@ distance(skylineA, skylineB):
   // iterate both skylines simultaneously at segment boundaries
 ```
 
-Padding is applied by inflating each skyline outward by the required clearance distance.
+Padding is applied by inflating each skyline outward by the required clearance distance. This is what allows LilyPond to handle dense scores without performance collapse. For any system where many elements need clearance checks (accidentals, articulations, annotations), this pattern is far more scalable than bounding-box intersection.
 
-This is what allows LilyPond to handle dense scores without performance collapse. For any system where many elements need clearance checks (accidentals, articulations, annotations), this pattern is far more scalable than bounding-box intersection.
+### The collision contract
 
----
+The most important engineering decision about collision handling is not which technique you use first — it is that **all engravables obey a uniform collision contract**. Every element that can collide should export a collision shape through a single API:
 
-## Multi-voice / polyphony
+```ts
+interface Engravable {
+  getCollisionShape(): BoundingBox | SkylineProfile
+}
+```
 
-### Voice stem conventions
+Start with bounding boxes. Design the interface so that upgrading an element to export a skyline profile requires no changes to the collision-checking code — only to the element itself. This makes the path from "working" to "high quality" incremental rather than a rewrite.
 
-**Universal across all systems:**
-
-- Voice 1 = stems UP
-- Voice 2 = stems DOWN
-
-Three voices: middle voice yields to beamed notes in adjacent voices; un-beamed middle-voice notes adjust direction to resolve conflicts.
-
-### Shared noteheads at unison
-
-Notes at the same pitch in different voices may share a notehead under strict conditions. Both stems attach to the shared notehead. Conditions for sharing:
-
-- Same head style
-- Same dot count
-- Same head type
-- Never quarter + half at unison
-- Never whole notes
-
-### Offsetting noteheads for seconds
-
-When notes in the same chord are a second apart (including across voices), one displaces horizontally. The displacement side depends on which voice is above/below — typically the lower voice's notehead shifts right. The stem of the displaced note still originates from the correct side of its notehead.
-
-### Rest collision handling
-
-When rests from opposing voices occupy the same vertical region, they are displaced. Voice 1 rest moves upward; Voice 2 rest moves downward. The specific displacement amount depends on the rests' durations and the density of surrounding material.
+Without this contract, collision handling fragments into a web of ad hoc pairwise checks that is impossible to scale or reason about.
 
 ---
 
@@ -908,14 +1249,14 @@ When rests from opposing voices occupy the same vertical region, they are displa
 
 ### Placement rules
 
-**Default position:** Above the note (or below when notated that way). When a stem is present, articulations go on the stem side by default for accent/tenuto; staccato always goes between the note and the stem tip.
+**Default position:** above the note (or below when notated that way). When a stem is present, articulations go on the stem side by default for accent/tenuto; staccato always goes between the note and the stem tip.
 
 **Offset from note:**
 
 - Stem-tip side: initial offset = 0.5 staff spaces from stem tip
 - Non-stem side: initial offset = 1.0 staff spaces from notehead
 
-**Snapping to staff positions:** Articulations snap to the nearest line or space. If the snapped position would be on a staff line and the articulation needs to be between lines, it shifts an additional 0.5 spaces away from the note.
+**Snapping to staff positions:** articulations snap to the nearest line or space. If the snapped position would be on a staff line and the articulation needs to be between lines, it shifts an additional 0.5 spaces away from the note.
 
 ### Stacking multiple articulations
 
@@ -931,7 +1272,7 @@ Most articulations default to `avoid-slur: inside` — they stay between the not
 
 ### Outside-staff priority
 
-Articulations outside the staff have an `outside-staff-priority` value that controls their stacking order relative to other outside-staff elements (dynamics, text, etc.). Higher priority = closer to the staff.
+Articulations outside the staff have an `outside-staff-priority` value that controls stacking order relative to other outside-staff elements (dynamics, text, etc.). Higher priority = closer to the staff.
 
 ---
 
@@ -949,75 +1290,18 @@ A hairpin is a wedge shape:
 - Lines converge to a point at the closed end
 
 LilyPond hairpin properties:
-| Property | Default | Meaning |
-|----------|---------|---------|
-| `height` | 0.667 ss | Maximum opening height |
-| `thickness` | 1.0 (staff-line multiples) | Line thickness |
-| `minimum-length` | 2.0 ss | Minimum span |
+
+| Property         | Default | Meaning                |
+| ---------------- | ------- | ---------------------- |
+| `height`         | 0.667 ss | Maximum opening height |
+| `thickness`      | 1.0 (staff-line multiples) | Line thickness |
+| `minimum-length` | 2.0 ss  | Minimum span           |
 
 Verovio: maximum hairpin angle capped at **16 degrees** to prevent overly steep wedges. Angle is computed as `theta = 2 × atan((endY / 2) / length)` and clipped at the maximum.
 
 ---
 
-## Rendering architecture
-
-### Logical → graphical separation (LilyPond)
-
-Strict pipeline stages:
-
-1. **Music expressions** — pitches, durations, logical structure (Scheme data)
-2. **Contexts** (Score → Staff → Voice) — hierarchical processing containers
-3. **Engravers** — convert music expressions into graphical objects (grobs)
-4. **Grobs** — layout objects with lazily-evaluated properties
-5. **Stencils** — actual drawing instructions
-
-Properties are computed via callbacks on demand. A stem's direction is only computed when requested, allowing later stages to modify earlier decisions without re-running the full pipeline. This lazy evaluation is key to keeping interdependent layout decisions manageable.
-
-### Functor visitor pattern (Verovio)
-
-All layout passes are independent functors that traverse the object tree in sequence:
-
-- `CalcStemFunctor` — stem directions and lengths
-- `CalcBeamFunctor` — beam slopes and positions
-- `CalcSlurFunctor` — slur control points
-- `CalcAccidsFunctor` — accidental stacking
-- `AdjustDotsFunctor` — dot vertical positioning
-- `HorizontalAligner` — x-coordinate assignment
-- `SpacingFunctor` — proportional spacing
-
-Each functor is a single focused pass, easy to reason about in isolation and to reorder when needed.
-
-### TickContext / ModifierContext (VexFlow)
-
-A `TickContext` groups all notes at the **same beat position** across all voices. Spacing is computed once per tick context. A `ModifierContext` groups all modifiers at the same tick and formats them in a fixed sequence (dots → accidentals → articulations → annotations). Each step assumes prior steps are complete.
-
-`Formatter.format()` phases:
-
-1. `preFormat()` — calculate width for each tickable and its modifiers
-2. `postFormat()` — position all contexts horizontally using softmax spacing
-3. Apply final positions to stave elements
-
-### SVG layer ordering (standard across all systems)
-
-Paint order, bottom-to-top (later elements visually on top):
-
-1. Background, filled regions
-2. Staff lines, ledger lines
-3. Noteheads
-4. Stems
-5. Beams
-6. Flags
-7. Dots, accidentals, articulations
-8. Ties, slurs — always above other note elements
-9. Text labels, dynamics, chord symbols, annotations
-
-### SVG precision
-
-VexFlow renders to 3 decimal places (`RENDER_PRECISION_PLACES = 3`). Coordinates use internal pen state (pen.x, pen.y) in screen coordinates (Y increases downward). Scaling via SVG `viewBox`, not CSS transforms. All paths use moveTo / lineTo / bezierCurveTo / arc primitives.
-
----
-
-## Key constants reference
+## Key Constants Reference
 
 All values in **staff spaces** unless otherwise noted. Staff space = distance between adjacent staff lines.
 
@@ -1039,7 +1323,7 @@ Staff line thickness:        0.13 ss
 Slur max height:             2.0 ss
 Slur ratio:                  0.25–0.33
 Slur min length:             1.5 ss
-Tie bezier height:           ~0.6 ss  (1.6 × drawingUnit where unit ≈ 0.375 ss)
+Tie Bézier height:           ~0.6 ss  (1.6 × drawingUnit where unit ≈ 0.375 ss)
 Tie min length:              1.5 ss
 Tie line-thickness:          0.8 × staff-line-thickness
 Tie arc thickness:           1.2 × staff-line-thickness
@@ -1076,9 +1360,42 @@ Grace note stem scale:       0.75×
 
 ---
 
-## Adaptation notes for this system
+## Testing, Performance, and Determinism
 
-This system uses a custom pitch-space layout rather than traditional staves. The following standard assumptions require adaptation:
+### Regression testing with golden images
+
+LilyPond's quality comes significantly from relentless comparison against hand-engraved reference material and regression test suites. Practical strategy for this system:
+
+1. Build a corpus of "engraving torture tests": dense accidentals, seconds in chords, multi-voice rests, beams across mixed pitches, nested tuplets, slurs across articulations
+2. Render each to SVG and store as golden outputs
+3. On every code change, run visual diffs against the goldens (perceptual diff tools like `pixelmatch` work well)
+4. Any regression in visual output fails the build
+
+This is the closest analogue to how LilyPond evolves — not spec compliance testing but perceptual quality tracking.
+
+### Determinism: metadata measurement vs. DOM measurement
+
+A key engineering choice for browser-based notation renderers:
+
+**DOM-dependent measurement** (abcjs approach): uses browser text measurement (`getBoundingClientRect`, `measureText`) for spacing. Cannot run off-thread or server-side without a live DOM. Layout is not deterministic across browser versions.
+
+**Metadata-based measurement** (VexFlow, Verovio approach): uses SMuFL font metadata (`glyphAdvanceWidths`, bounding boxes, anchor points) for all layout calculations. DOM is only needed for the final SVG paint step. Layout is fully deterministic and can run in Node.js, Workers, or server-side.
+
+**Recommendation:** adopt metadata-based measurement. Embed `bravura_metadata.json` at build time and use it for all glyph advance widths and anchor points. This enables deterministic tests, server-side pre-rendering, and layout in Workers.
+
+### Performance at scale
+
+For dense scores (many notes per segment, articulations, dense accidentals):
+
+- **Skyline profiles over O(n²) bounding-box checks** — LilyPond's skyline scales linearly with element count for collision checks. Bounding-box pairwise checks grow quadratically.
+- **TickContext grouping** (VexFlow) — compute spacing once per beat position, not once per note. In a multi-voice score with 4 voices sharing 16th-note runs, this reduces spacing work by ≈4×.
+- **Functor passes over recursive traversal** (Verovio) — each layout pass traverses the tree once in a focused, cache-friendly manner. Recursive "do everything while visiting" traversals are harder to optimise and profile.
+
+---
+
+## Adaptation Notes for This System
+
+This system uses a custom pitch-space layout rather than traditional staves. The following standard assumptions require adaptation.
 
 **Staff-space unit:** The system's `ROW_HEIGHT` (currently `3px`) is the equivalent unit. All constants above scale from it. A "staff space" = `ROW_HEIGHT` in this system.
 
@@ -1086,12 +1403,20 @@ This system uses a custom pitch-space layout rather than traditional staves. The
 
 **Dot positioning:** The pitch row grid is already discretized. Dots-in-spaces maps directly: a dot for a note at row `n` goes at row `n + 0.5`. Check whether row `n + 0.5` is occupied before committing.
 
-**Rest positioning:** The whole/half rest visual distinction (hang vs sit) still applies and aids recognition. The specific staff-line anchoring rules are replaced by positioning relative to the local pitch window center.
+**Rest positioning:** The whole/half rest visual distinction (hang vs. sit) still applies and aids recognition. The specific staff-line anchoring rules are replaced by positioning relative to the local pitch window center.
 
 **Horizontal spacing:** The current layout uses a fixed segment width. When notes of varying duration appear within a segment, the Gourlay formula or the Verovio power-law model gives perceptually correct proportions. Both scale from the shortest note present.
 
-**Glyph rendering:** The biggest single quality improvement available is switching from hand-drawn SVG primitives to the Bravura font with SMuFL codepoints. Embed the font, use the anchor metadata for stem attachment and ledger line clipping. Every other serious system does this because the glyph proportions are professionally designed and the anchor data eliminates geometry guesswork entirely.
+**Glyph rendering:** The biggest single quality improvement available is switching from hand-drawn SVG primitives to the Bravura font with SMuFL codepoints. Embed the font, use anchor metadata for stem attachment. Every other serious system does this because the glyph proportions are professionally designed and the anchor data eliminates geometry guesswork entirely.
 
 **Ledger lines:** In this system, "ledger lines" are not needed in the stave sense, since pitch position is continuous rather than anchored to fixed staff lines. The concept may re-emerge if extended pitch ranges are indicated with supplementary position markers.
 
-**Layer ordering for SVG:** The standard paint order above applies directly. Harmonic region shapes (the current span fills) should be the lowest layer; note events render above them; ties, slurs, and annotations go on top.
+**Layer ordering for SVG:** The standard paint order applies directly. Harmonic region shapes (the current span fills) are the lowest layer; note events render above them; ties, slurs, and annotations go on top.
+
+**Attachment semantics:** This system will need a strong attachment language that can express: "this glyph is attached to a notehead", "this tie endpoint is attached to this event's pitch row", "this beam belongs to this rhythmic group", and "this symbol floats relative to a harmonic region or segment subdivision." Building this early — before notation symbols are numerous — avoids the expensive retrofit that MuseScore had to do in version 4.4.
+
+**Staff space mapping:** A robust approach is to define a single unit conversion layer — internal engraving unit = staff space (float), projection provides y in pitch-rows plus a `{ pitchRow → staffSpaceY }` mapping, and the renderer converts staff-space geometry to SVG px via one global scale factor. This keeps all engraving constants (stem thickness, beam thickness, slur thickness, padding values) in a consistent unit system as SMuFL intends.
+
+**Import/export boundary:** Think early about what part of this system is "notation as appearance" vs. "notation as musical semantics." Even if the internal model stays custom, having a clear boundary enables future import (ABC, MusicXML fragments) and export (SMuFL-stamped SVG, MIDI) without architectural surgery. Verovio's value is partly that this boundary was designed in from the start.
+
+**The central unknown:** Once conventional notation symbols enter a non-conventional stave, the hard part is no longer the glyphs themselves. It is the contract between musical semantics, rhythmic grouping, vertical reference, and attachment behaviour. This is where mature systems have done the most work, and where this system will either stay clean or become brittle. Every architectural decision about the engraving layer is really a decision about this contract.
