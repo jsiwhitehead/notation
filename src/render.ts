@@ -12,26 +12,76 @@ import {
   getSmuflAnchor,
   getSmuflGlyphBox,
   getSmuflGlyphCharacter,
+  type SmuflGlyphName,
 } from "./smufl";
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 // Render units.
 const PITCH_STEP_HEIGHT_PX = 3;
 const NOTEHEAD_HEIGHT_PX = 8;
-const NOTEHEAD_BLACK_BOX = getSmuflGlyphBox("noteheadBlack");
-const NOTEHEAD_BLACK = {
+const DURATION_EPSILON = 0.001;
+const QUARTER_DURATION = 1;
+const HALF_DURATION = 2;
+const WHOLE_DURATION = 4;
+
+type RenderGlyph = {
+  box: ReturnType<typeof getSmuflGlyphBox>;
   center: {
-    x: (NOTEHEAD_BLACK_BOX.sw.x + NOTEHEAD_BLACK_BOX.ne.x) / 2,
-    y: (NOTEHEAD_BLACK_BOX.sw.y + NOTEHEAD_BLACK_BOX.ne.y) / 2,
-  },
-  character: getSmuflGlyphCharacter("noteheadBlack"),
-  heightStaffSpaces: NOTEHEAD_BLACK_BOX.ne.y - NOTEHEAD_BLACK_BOX.sw.y,
-  stemUpSE: getSmuflAnchor("noteheadBlack", "stemUpSE")!,
+    x: number;
+    y: number;
+  };
+  character: string;
+  heightStaffSpaces: number;
+  widthStaffSpaces: number;
 };
+
+type RenderNoteheadGlyph = RenderGlyph & {
+  stemUpSE: ReturnType<typeof getSmuflAnchor>;
+};
+
+function getRenderGlyph(name: SmuflGlyphName): RenderGlyph {
+  const box = getSmuflGlyphBox(name);
+
+  return {
+    box,
+    center: {
+      x: (box.sw.x + box.ne.x) / 2,
+      y: (box.sw.y + box.ne.y) / 2,
+    },
+    character: getSmuflGlyphCharacter(name),
+    heightStaffSpaces: box.ne.y - box.sw.y,
+    widthStaffSpaces: box.ne.x - box.sw.x,
+  };
+}
+
+function getRenderNoteheadGlyph(name: SmuflGlyphName): RenderNoteheadGlyph {
+  const glyph = getRenderGlyph(name);
+
+  return {
+    ...glyph,
+    stemUpSE: getSmuflAnchor(name, "stemUpSE"),
+  };
+}
+
+const NOTEHEAD_BLACK = getRenderNoteheadGlyph("noteheadBlack");
+const NOTEHEAD_HALF = getRenderNoteheadGlyph("noteheadHalf");
+const NOTEHEAD_WHOLE = getRenderNoteheadGlyph("noteheadWhole");
+const REST_16TH = getRenderGlyph("rest16th");
+const REST_32ND = getRenderGlyph("rest32nd");
+const REST_64TH = getRenderGlyph("rest64th");
+const REST_8TH = getRenderGlyph("rest8th");
+const REST_HALF = getRenderGlyph("restHalf");
+const REST_QUARTER = getRenderGlyph("restQuarter");
+const REST_WHOLE = getRenderGlyph("restWhole");
+const FLAG_16TH_UP = getRenderGlyph("flag16thUp");
+const FLAG_32ND_UP = getRenderGlyph("flag32ndUp");
+const FLAG_64TH_UP = getRenderGlyph("flag64thUp");
+const FLAG_8TH_UP = getRenderGlyph("flag8thUp");
 const PX_PER_STAFF_SPACE =
   NOTEHEAD_HEIGHT_PX / NOTEHEAD_BLACK.heightStaffSpaces;
 const MUSIC_GLYPH_FONT_SIZE_PX = PX_PER_STAFF_SPACE * 4;
 const ENGRAVING_DEFAULTS = getEngravingDefaults();
+const STEM_THICKNESS_PX = ENGRAVING_DEFAULTS.stemThickness * PX_PER_STAFF_SPACE;
 
 // Engraving units.
 const STEM_LENGTH_STAFF_SPACES = 3.5;
@@ -45,9 +95,6 @@ const SEGMENT_SEAM_PX = 1;
 const JOIN_CURVE_CONTROL_X_RATIO = 0.65;
 
 // Event and mark dimensions.
-const MIN_EVENT_WIDTH_PX = 12;
-const REST_WIDTH_PX = 14;
-const REST_HEIGHT_PX = 2;
 const GROUNDING_MARK_HEIGHT_PX = 3;
 const GROUNDING_MARK_WIDTH_PX = 10;
 
@@ -86,6 +133,35 @@ type RegionPaint = {
 
 type CubicCurve = [Point, Point, Point, Point];
 
+type ShapedPitchedNotehead = {
+  centerX: number;
+  pitch: number;
+};
+
+type ShapedPitchedEvent = {
+  flagGlyph: RenderGlyph | undefined;
+  hasStem: boolean;
+  noteheadGlyph: RenderNoteheadGlyph;
+  noteheads: ShapedPitchedNotehead[];
+  stemBaseNotehead: ShapedPitchedNotehead | undefined;
+  stemTipPitch: number | undefined;
+};
+
+type UpStemGeometry = {
+  anchorY: number;
+  centerX: number;
+  leftX: number;
+  tipY: number;
+};
+
+type DurationAppearance = {
+  flagGlyph: RenderGlyph | undefined;
+  hasStem: boolean;
+  noteheadGlyph: RenderNoteheadGlyph;
+  restGlyph: RenderGlyph;
+  threshold: number;
+};
+
 function createSvgElement<K extends keyof SVGElementTagNameMap>(
   tagName: K,
 ): SVGElementTagNameMap[K] {
@@ -111,6 +187,76 @@ function getXForSegment(index: number): number {
 
 function staffSpacesToPx(value: number): number {
   return value * PX_PER_STAFF_SPACE;
+}
+
+function isDurationAtLeast(duration: number, threshold: number): boolean {
+  return duration + DURATION_EPSILON >= threshold;
+}
+
+const DURATION_APPEARANCES: DurationAppearance[] = [
+  {
+    flagGlyph: undefined,
+    hasStem: false,
+    noteheadGlyph: NOTEHEAD_WHOLE,
+    restGlyph: REST_WHOLE,
+    threshold: WHOLE_DURATION,
+  },
+  {
+    flagGlyph: undefined,
+    hasStem: true,
+    noteheadGlyph: NOTEHEAD_HALF,
+    restGlyph: REST_HALF,
+    threshold: HALF_DURATION,
+  },
+  {
+    flagGlyph: undefined,
+    hasStem: true,
+    noteheadGlyph: NOTEHEAD_BLACK,
+    restGlyph: REST_QUARTER,
+    threshold: QUARTER_DURATION,
+  },
+  {
+    flagGlyph: FLAG_8TH_UP,
+    hasStem: true,
+    noteheadGlyph: NOTEHEAD_BLACK,
+    restGlyph: REST_8TH,
+    threshold: 0.5,
+  },
+  {
+    flagGlyph: FLAG_16TH_UP,
+    hasStem: true,
+    noteheadGlyph: NOTEHEAD_BLACK,
+    restGlyph: REST_16TH,
+    threshold: 0.25,
+  },
+  {
+    flagGlyph: FLAG_32ND_UP,
+    hasStem: true,
+    noteheadGlyph: NOTEHEAD_BLACK,
+    restGlyph: REST_32ND,
+    threshold: 0.125,
+  },
+  {
+    flagGlyph: FLAG_64TH_UP,
+    hasStem: true,
+    noteheadGlyph: NOTEHEAD_BLACK,
+    restGlyph: REST_64TH,
+    threshold: 0,
+  },
+];
+
+function getDurationAppearance(duration: number): DurationAppearance {
+  return (
+    DURATION_APPEARANCES.find((appearance) =>
+      isDurationAtLeast(duration, appearance.threshold),
+    ) ?? DURATION_APPEARANCES.at(-1)!
+  );
+}
+
+function getNoteheadDisplacementPx(noteheadGlyph: RenderNoteheadGlyph): number {
+  return (
+    noteheadGlyph.widthStaffSpaces * PX_PER_STAFF_SPACE - STEM_THICKNESS_PX / 2
+  );
 }
 
 function getCenterDarkColor(projectedSegment: ProjectionSegment): string {
@@ -176,23 +322,25 @@ function appendGroundMark(
 function appendRest(
   group: SVGGElement,
   centerX: number,
-  width: number,
   maxPitch: number,
   pitch: number,
+  glyph: RenderGlyph,
 ): void {
-  const rect = createSvgElement("rect");
-  const y = getYForPitch(maxPitch, pitch) - REST_HEIGHT_PX / 2;
-  const rectWidth = Math.max(REST_WIDTH_PX, width);
+  const y = getYForPitch(maxPitch, pitch);
+  const rest = createSvgElement("text");
+  const originX = centerX - staffSpacesToPx(glyph.center.x);
+  const originY = y + staffSpacesToPx(glyph.center.y);
 
-  setAttributes(rect, {
+  setAttributes(rest, {
     fill: "#666666",
-    height: REST_HEIGHT_PX,
-    width: rectWidth,
-    x: centerX - rectWidth / 2,
-    y,
+    "font-family": getMusicFontFamily(),
+    "font-size": MUSIC_GLYPH_FONT_SIZE_PX,
+    x: originX,
+    y: originY,
   });
+  rest.textContent = glyph.character;
 
-  group.append(rect);
+  group.append(rest);
 }
 
 function appendProjectedSpan(
@@ -439,11 +587,12 @@ function appendNote(
   centerX: number,
   maxPitch: number,
   pitch: number,
+  glyph: RenderNoteheadGlyph,
 ): { originX: number; originY: number } {
   const notehead = createSvgElement("text");
   const y = getYForPitch(maxPitch, pitch);
-  const originX = centerX - staffSpacesToPx(NOTEHEAD_BLACK.center.x);
-  const originY = y + staffSpacesToPx(NOTEHEAD_BLACK.center.y);
+  const originX = centerX - staffSpacesToPx(glyph.center.x);
+  const originY = y + staffSpacesToPx(glyph.center.y);
 
   setAttributes(notehead, {
     fill: "#111111",
@@ -452,53 +601,176 @@ function appendNote(
     x: originX,
     y: originY,
   });
-  notehead.textContent = NOTEHEAD_BLACK.character;
+  notehead.textContent = glyph.character;
 
   group.append(notehead);
 
   return { originX, originY };
 }
 
-function appendStem(
-  group: SVGGElement,
-  noteheadOrigin: { originX: number; originY: number },
-): void {
+function appendStem(group: SVGGElement, stemGeometry: UpStemGeometry): void {
   const stem = createSvgElement("line");
-  const stemLength = staffSpacesToPx(STEM_LENGTH_STAFF_SPACES);
-  const stemThickness = staffSpacesToPx(ENGRAVING_DEFAULTS.stemThickness);
-  const anchorX =
-    noteheadOrigin.originX + staffSpacesToPx(NOTEHEAD_BLACK.stemUpSE.x);
-  const anchorY =
-    noteheadOrigin.originY - staffSpacesToPx(NOTEHEAD_BLACK.stemUpSE.y);
-  const stemRightX = anchorX;
-  const stemLeftX = stemRightX - stemThickness;
-  const stemCenterX = (stemLeftX + stemRightX) / 2;
-  const stemBottomY = anchorY;
-  const stemTopY = stemBottomY - stemLength;
 
   setAttributes(stem, {
     stroke: "#111111",
     "stroke-linecap": "butt",
-    "stroke-width": stemThickness,
-    x1: stemCenterX,
-    x2: stemCenterX,
-    y1: stemBottomY,
-    y2: stemTopY,
+    "stroke-width": STEM_THICKNESS_PX,
+    x1: stemGeometry.centerX,
+    x2: stemGeometry.centerX,
+    y1: stemGeometry.anchorY,
+    y2: stemGeometry.tipY,
   });
 
   group.append(stem);
 }
 
+function appendFlag(
+  group: SVGGElement,
+  flagGlyph: RenderGlyph,
+  stemLeftX: number,
+  stemTipY: number,
+): void {
+  const flag = createSvgElement("text");
+
+  setAttributes(flag, {
+    fill: "#111111",
+    "font-family": getMusicFontFamily(),
+    "font-size": MUSIC_GLYPH_FONT_SIZE_PX,
+    x: stemLeftX,
+    y: stemTipY,
+  });
+  flag.textContent = flagGlyph.character;
+
+  group.append(flag);
+}
+
+function getUpStemGeometry(
+  noteheadGlyph: RenderNoteheadGlyph,
+  noteheadOrigin: { originX: number; originY: number },
+  maxPitch: number,
+  stemTipPitch: number,
+): UpStemGeometry | undefined {
+  const stemUpSE = noteheadGlyph.stemUpSE;
+
+  if (stemUpSE === undefined) {
+    return undefined;
+  }
+
+  const anchorX = noteheadOrigin.originX + staffSpacesToPx(stemUpSE.x);
+  const anchorY = noteheadOrigin.originY - staffSpacesToPx(stemUpSE.y);
+  const tipY =
+    getYForPitch(maxPitch, stemTipPitch) -
+    staffSpacesToPx(stemUpSE.y) -
+    staffSpacesToPx(STEM_LENGTH_STAFF_SPACES);
+  const leftX = anchorX - STEM_THICKNESS_PX;
+
+  return {
+    anchorY,
+    centerX: anchorX - STEM_THICKNESS_PX / 2,
+    leftX,
+    tipY,
+  };
+}
+
+function shapePitchedEvent(
+  centerX: number,
+  duration: number,
+  pitches: number[],
+): ShapedPitchedEvent | undefined {
+  const sortedPitches = [...pitches].sort((left, right) => left - right);
+  const noteheads: ShapedPitchedNotehead[] = [];
+  const durationAppearance = getDurationAppearance(duration);
+  const noteheadGlyph = durationAppearance.noteheadGlyph;
+  const hasStem = durationAppearance.hasStem;
+  const flagGlyph = durationAppearance.flagGlyph;
+  const noteheadDisplacementPx = getNoteheadDisplacementPx(noteheadGlyph);
+
+  sortedPitches.forEach((pitch) => {
+    const previousNotehead = noteheads.at(-1);
+    const overlapsPrevious =
+      previousNotehead !== undefined &&
+      (pitch - previousNotehead.pitch) * PITCH_STEP_HEIGHT_PX <
+        noteheadGlyph.heightStaffSpaces * PX_PER_STAFF_SPACE;
+
+    noteheads.push({
+      centerX: overlapsPrevious ? centerX + noteheadDisplacementPx : centerX,
+      pitch,
+    });
+  });
+
+  if (noteheads.length === 0) {
+    return undefined;
+  }
+
+  return {
+    flagGlyph,
+    hasStem,
+    noteheadGlyph,
+    noteheads,
+    stemBaseNotehead: hasStem ? noteheads[0] : undefined,
+    stemTipPitch: hasStem ? sortedPitches.at(-1) : undefined,
+  };
+}
+
 function appendPitchedEvent(
   group: SVGGElement,
   centerX: number,
+  duration: number,
   maxPitch: number,
   pitches: number[],
 ): void {
-  pitches.forEach((pitch) => {
-    const noteheadOrigin = appendNote(group, centerX, maxPitch, pitch);
-    appendStem(group, noteheadOrigin);
+  const shapedEvent = shapePitchedEvent(centerX, duration, pitches);
+
+  if (shapedEvent === undefined) {
+    return;
+  }
+
+  let stemOrigin:
+    | {
+        originX: number;
+        originY: number;
+      }
+    | undefined;
+
+  shapedEvent.noteheads.forEach((notehead) => {
+    const noteheadOrigin = appendNote(
+      group,
+      notehead.centerX,
+      maxPitch,
+      notehead.pitch,
+      shapedEvent.noteheadGlyph,
+    );
+
+    if (notehead === shapedEvent.stemBaseNotehead) {
+      stemOrigin = noteheadOrigin;
+    }
   });
+
+  if (
+    stemOrigin !== undefined &&
+    shapedEvent.stemTipPitch !== undefined &&
+    shapedEvent.hasStem
+  ) {
+    const stemGeometry = getUpStemGeometry(
+      shapedEvent.noteheadGlyph,
+      stemOrigin,
+      maxPitch,
+      shapedEvent.stemTipPitch,
+    );
+
+    if (stemGeometry !== undefined) {
+      appendStem(group, stemGeometry);
+
+      if (shapedEvent.flagGlyph !== undefined) {
+        appendFlag(
+          group,
+          shapedEvent.flagGlyph,
+          stemGeometry.leftX,
+          stemGeometry.tipY,
+        );
+      }
+    }
+  }
 }
 
 function appendEventMark(
@@ -517,14 +789,25 @@ function appendEventMark(
       projectedSegment.totalDuration) *
       SEGMENT_WIDTH_PX;
   const centerX = (startX + endX) / 2;
-  const width = Math.max(endX - startX, MIN_EVENT_WIDTH_PX);
 
   switch (projectedEvent.type) {
     case "pitched":
-      appendPitchedEvent(group, centerX, maxPitch, projectedEvent.pitches);
+      appendPitchedEvent(
+        group,
+        centerX,
+        projectedEvent.duration,
+        maxPitch,
+        projectedEvent.pitches,
+      );
       return;
     case "rest":
-      appendRest(group, centerX, width, maxPitch, projectedEvent.pitch);
+      appendRest(
+        group,
+        centerX,
+        maxPitch,
+        projectedEvent.pitch,
+        getDurationAppearance(projectedEvent.duration).restGlyph,
+      );
   }
 }
 

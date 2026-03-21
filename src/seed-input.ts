@@ -5,7 +5,7 @@ export const SEED_INPUT: PieceInput = {
     {
       events: [
         { duration: 1, pitch: 5, type: "note" },
-        { duration: 2, pitches: [2, 9], type: "chord" },
+        { duration: 2, pitches: [0, 2, 9], type: "chord" },
       ],
       chordSymbol: "Dmin7",
     },
