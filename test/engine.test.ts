@@ -104,7 +104,7 @@ describe("runEngine", () => {
       expectRegionPitchClasses(segment.field, [0, 7, 2, 9, 4]);
     });
 
-    test("keeps weak unguided evidence sparse when it does not settle a region", () => {
+    test("keeps weak event-only evidence sparse when it does not settle a region", () => {
       const segment = getSingleSegment({
         events: [
           { duration: 1, pitch: 60, type: "note" },

@@ -4,20 +4,19 @@ import lelandMetadata from "./leland_metadata.json";
 const MUSIC_FONT_FAMILY = "Leland";
 
 type GlyphNamesData = typeof glyphNames;
-export type SmuflGlyphName = keyof GlyphNamesData;
-export type SmuflAnchorName = string;
+export type GlyphName = keyof GlyphNamesData;
 
-export type SmuflPoint = {
+type Point = {
   x: number;
   y: number;
 };
 
-export type SmuflBoundingBox = {
-  ne: SmuflPoint;
-  sw: SmuflPoint;
+type BoundingBox = {
+  ne: Point;
+  sw: Point;
 };
 
-export type SmuflEngravingDefaults = typeof lelandMetadata.engravingDefaults;
+type EngravingDefaults = typeof lelandMetadata.engravingDefaults;
 
 type MetadataBoundingBox = {
   bBoxNE: number[];
@@ -27,19 +26,19 @@ type MetadataBoundingBox = {
 type MetadataAnchorMap = Partial<Record<string, number[]>>;
 
 const METADATA_GLYPH_BOUNDS = lelandMetadata.glyphBBoxes as Partial<
-  Record<SmuflGlyphName, MetadataBoundingBox>
+  Record<GlyphName, MetadataBoundingBox>
 >;
 const METADATA_GLYPH_ANCHORS = lelandMetadata.glyphsWithAnchors as Partial<
-  Record<SmuflGlyphName, MetadataAnchorMap>
+  Record<GlyphName, MetadataAnchorMap>
 >;
 const GLYPH_CHARACTERS = Object.fromEntries(
   Object.entries(glyphNames).map(([name, value]) => [
     name,
     String.fromCodePoint(Number.parseInt(value.codepoint.slice(2), 16)),
   ]),
-) as Record<SmuflGlyphName, string>;
+) as Record<GlyphName, string>;
 
-function getRequiredGlyphBounds(name: SmuflGlyphName): MetadataBoundingBox {
+function getRequiredGlyphBounds(name: GlyphName): MetadataBoundingBox {
   const bounds = METADATA_GLYPH_BOUNDS[name];
 
   if (bounds === undefined) {
@@ -49,7 +48,7 @@ function getRequiredGlyphBounds(name: SmuflGlyphName): MetadataBoundingBox {
   return bounds;
 }
 
-function getRequiredPoint(values: number[], label: string): SmuflPoint {
+function getRequiredPoint(values: number[], label: string): Point {
   const [x, y] = values;
 
   if (x === undefined || y === undefined) {
@@ -63,7 +62,7 @@ export function getMusicFontFamily(): string {
   return MUSIC_FONT_FAMILY;
 }
 
-export function getSmuflGlyphCharacter(name: SmuflGlyphName): string {
+export function getGlyphCharacter(name: GlyphName): string {
   const glyphCharacter = GLYPH_CHARACTERS[name];
 
   if (glyphCharacter === undefined) {
@@ -73,7 +72,7 @@ export function getSmuflGlyphCharacter(name: SmuflGlyphName): string {
   return glyphCharacter;
 }
 
-export function getSmuflGlyphBox(name: SmuflGlyphName): SmuflBoundingBox {
+export function getGlyphBox(name: GlyphName): BoundingBox {
   const bounds = getRequiredGlyphBounds(name);
 
   return {
@@ -82,10 +81,10 @@ export function getSmuflGlyphBox(name: SmuflGlyphName): SmuflBoundingBox {
   };
 }
 
-export function getSmuflAnchor(
-  name: SmuflGlyphName,
-  anchorName: SmuflAnchorName,
-): SmuflPoint | undefined {
+export function getAnchor(
+  name: GlyphName,
+  anchorName: string,
+): Point | undefined {
   const anchor = METADATA_GLYPH_ANCHORS[name]?.[anchorName];
 
   return anchor === undefined
@@ -93,6 +92,6 @@ export function getSmuflAnchor(
     : getRequiredPoint(anchor, `${name}.${anchorName}`);
 }
 
-export function getEngravingDefaults(): SmuflEngravingDefaults {
+export function getEngravingDefaults(): EngravingDefaults {
   return lelandMetadata.engravingDefaults;
 }

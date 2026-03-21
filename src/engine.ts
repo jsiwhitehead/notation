@@ -38,25 +38,25 @@ function countOverlap(left: PitchClass[], right: PitchClass[]): number {
 }
 
 function collectSegmentEvidence(segment: SegmentInput): SegmentEvidence {
-  const normalizedGuidance =
+  const normalizedChordSymbol =
     segment.chordSymbol === undefined
       ? undefined
       : normalizeChordSymbol(segment.chordSymbol);
   const eventPitchClasses = uniqueSortedPitchClasses(
     segment.events.flatMap(getEventPitchClasses),
   );
-  const guidancePitchClasses = normalizedGuidance?.pitchClasses ?? [];
+  const chordPitchClasses = normalizedChordSymbol?.pitchClasses ?? [];
 
   return {
     localPitchClasses: uniqueSortedPitchClasses([
       ...eventPitchClasses,
-      ...guidancePitchClasses,
+      ...chordPitchClasses,
     ]),
-    ...(normalizedGuidance === undefined
+    ...(normalizedChordSymbol === undefined
       ? {}
       : {
-          chordGroundPitchClass: normalizedGuidance.groundPitchClass,
-          chordRootPitchClass: normalizedGuidance.rootPitchClass,
+          chordGroundPitchClass: normalizedChordSymbol.groundPitchClass,
+          chordRootPitchClass: normalizedChordSymbol.rootPitchClass,
         }),
   };
 }

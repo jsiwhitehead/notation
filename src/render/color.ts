@@ -1,6 +1,5 @@
-import { getRegionMidpointInHalfFifths, mod, toFifthsPosition } from "./pitch";
-
-import type { PitchClass } from "./model";
+import type { PitchClass } from "../model";
+import { getRegionMidpointInHalfFifths, mod, toFifthsPosition } from "../pitch";
 
 const HARMONIC_WHEEL_SIZE = 24;
 const HARMONIC_WHEEL_24 = [

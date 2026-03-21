@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
-import { getEventPitchClasses, getEventPitches } from "../src/pitch";
+import {
+  getEventPitchClasses,
+  getEventPitches,
+  repeatPitchClassesAcrossRange,
+} from "../src/pitch";
 
 describe("pitch helpers", () => {
   test("getEventPitches returns pitches for notes and chords", () => {
@@ -27,5 +31,9 @@ describe("pitch helpers", () => {
         type: "chord",
       }),
     ).toEqual([0, 1, 7]);
+  });
+
+  test("repeatPitchClassesAcrossRange repeats pitch classes across octaves", () => {
+    expect(repeatPitchClassesAcrossRange(14, 0, [0, 7])).toEqual([0, 7, 12]);
   });
 });

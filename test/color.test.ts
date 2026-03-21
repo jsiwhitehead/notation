@@ -7,7 +7,7 @@ import {
   regionToColor,
   regionToWheel24,
   wheel24ToDarkColor,
-} from "../src/color";
+} from "../src/render/color";
 
 describe("harmonic color", () => {
   test("maps pitch classes to even wheel24 positions in fifth order", () => {

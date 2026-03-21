@@ -1,56 +1,101 @@
 import { describe, expect, test } from "bun:test";
 
 import { runEngine } from "../src/engine";
-import {
-  buildProjectedGroundingOverlays,
-  buildRegionSpanClasses,
-  buildProjection,
-  repeatRegionSpanClassesAcrossRange,
-} from "../src/projection";
-import { repeatPitchClassesAcrossRange } from "../src/pitch";
+import { buildProjection } from "../src/projection";
 import { SEED_INPUT } from "../src/seed-input";
 
 describe("projection", () => {
-  test("buildRegionSpanClasses groups contiguous tone-runs into spans", () => {
-    expect(
-      buildRegionSpanClasses({ pitchClasses: [0, 2, 4, 5, 7, 9, 11] }),
-    ).toEqual([
-      { end: 4, start: 0 },
-      { end: 11, start: 5 },
+  test("buildProjection groups contiguous tone-runs into projected spans", () => {
+    const projection = buildProjection(
+      {
+        segments: [
+          {
+            events: [
+              {
+                duration: 1,
+                pitches: [60, 62, 64, 65, 67, 69, 71],
+                type: "chord",
+              },
+            ],
+          },
+        ],
+      },
+      {
+        segments: [
+          {
+            center: { pitchClasses: [0, 2, 4, 5, 7, 9, 11] },
+            field: { pitchClasses: [0, 2, 4, 5, 7, 9, 11] },
+          },
+        ],
+      },
+    );
+
+    expect(projection.segments[0]?.placement.center.spans).toEqual([
+      { end: 59, start: 53 },
+      { end: 64, start: 60 },
+      { end: 71, start: 65 },
+      { end: 76, start: 72 },
     ]);
   });
 
-  test("buildRegionSpanClasses splits semitone-adjacent material into separate spans", () => {
-    expect(buildRegionSpanClasses({ pitchClasses: [11, 0, 1] })).toEqual([
-      { end: 0, start: 0 },
-      { end: 1, start: 1 },
-      { end: 11, start: 11 },
+  test("buildProjection splits semitone-adjacent material into separate projected spans", () => {
+    const projection = buildProjection(
+      {
+        segments: [
+          {
+            events: [{ duration: 1, pitches: [60, 61, 71], type: "chord" }],
+          },
+        ],
+      },
+      {
+        segments: [
+          {
+            center: { pitchClasses: [11, 0, 1] },
+            field: { pitchClasses: [11, 0, 1] },
+          },
+        ],
+      },
+    );
+
+    expect(projection.segments[0]?.placement.center.spans).toEqual([
+      { end: 59, start: 59 },
+      { end: 60, start: 60 },
+      { end: 61, start: 61 },
+      { end: 71, start: 71 },
+      { end: 72, start: 72 },
+      { end: 73, start: 73 },
     ]);
   });
 
-  test("repeatRegionSpanClassesAcrossRange repeats spans into visible pitch space", () => {
-    expect(
-      repeatRegionSpanClassesAcrossRange(
-        { maxPitch: 14, minPitch: 0 },
-        { end: 1, start: 0 },
-      ),
-    ).toEqual([
-      { end: 1, start: 0 },
-      { end: 13, start: 12 },
+  test("buildProjection repeats region spans across the visible pitch window", () => {
+    const projection = buildProjection(
+      {
+        segments: [
+          {
+            events: [{ duration: 1, pitches: [60, 61], type: "chord" }],
+          },
+        ],
+      },
+      {
+        segments: [
+          {
+            center: { pitchClasses: [0, 1] },
+            field: { pitchClasses: [11] },
+          },
+        ],
+      },
+    );
+
+    expect(projection.segments[0]?.placement.center.spans).toEqual([
+      { end: 60, start: 60 },
+      { end: 61, start: 61 },
     ]);
-    expect(
-      repeatRegionSpanClassesAcrossRange(
-        { maxPitch: 14, minPitch: 0 },
-        { end: 11, start: 11 },
-      ),
-    ).toEqual([{ end: 11, start: 11 }]);
+    expect(projection.segments[0]?.placement.field.spans).toEqual([
+      { end: 59, start: 59 },
+    ]);
   });
 
-  test("repeatPitchClassesAcrossRange repeats pitch classes across octaves", () => {
-    expect(repeatPitchClassesAcrossRange(14, 0, [0, 7])).toEqual([0, 7, 12]);
-  });
-
-  test("buildProjection placement repeats root and ground marks across the visible range", () => {
+  test("buildProjection projected grounding repeats root and ground marks across the visible range", () => {
     const projection = buildProjection(
       {
         segments: [
@@ -70,14 +115,16 @@ describe("projection", () => {
       },
     );
 
-    expect(projection.segments[0]?.placement.groundingOverlay).toEqual({
-      marks: [
-        { pitch: 60, type: "root" },
-        { pitch: 67, type: "ground" },
-      ],
-      groundPitchClass: 7,
-      rootPitchClass: 0,
-    });
+    expect(projection.segments[0]?.placement.projectedGroundingOverlay).toEqual(
+      {
+        marks: [
+          { pitch: 60, type: "root" },
+          { pitch: 67, type: "ground" },
+        ],
+        groundPitchClass: 7,
+        rootPitchClass: 0,
+      },
+    );
   });
 
   test("buildProjection emits render-ready harmonic placement data", () => {
@@ -123,7 +170,7 @@ describe("projection", () => {
             { end: 67, start: 67 },
           ],
         },
-        groundingOverlay: {
+        projectedGroundingOverlay: {
           marks: [
             { pitch: 60, type: "root" },
             { pitch: 67, type: "ground" },
@@ -131,7 +178,7 @@ describe("projection", () => {
           groundPitchClass: 7,
           rootPitchClass: 0,
         },
-        restPitch: 64,
+        restAnchorPitch: 64,
       },
     });
   });
@@ -169,8 +216,8 @@ describe("projection", () => {
       placement: {
         center: { spans: [] },
         field: { spans: [] },
-        groundingOverlay: undefined,
-        restPitch: 72,
+        projectedGroundingOverlay: undefined,
+        restAnchorPitch: 72,
       },
     });
     expect(projection.segments[1]?.events).toEqual([
@@ -178,8 +225,18 @@ describe("projection", () => {
     ]);
   });
 
-  test("buildProjectedGroundingOverlays projects root and ground marks within the grounding window", () => {
-    const overlays = buildProjectedGroundingOverlays(
+  test("buildProjection projects root and ground marks within the grounding window", () => {
+    const projection = buildProjection(
+      {
+        segments: [
+          {
+            events: [{ duration: 1, pitches: [60, 64, 67], type: "chord" }],
+          },
+          {
+            events: [{ duration: 1, pitches: [62, 67, 71], type: "chord" }],
+          },
+        ],
+      },
       {
         segments: [
           {
@@ -194,56 +251,30 @@ describe("projection", () => {
           },
         ],
       },
-      [
-        {
-          spans: [
-            { end: 60, start: 60 },
-            { end: 64, start: 64 },
-            { end: 67, start: 67 },
-          ],
-        },
-        {
-          spans: [
-            { end: 62, start: 62 },
-            { end: 67, start: 67 },
-            { end: 71, start: 71 },
-          ],
-        },
-      ],
-      [
-        {
-          spans: [
-            { end: 60, start: 60 },
-            { end: 64, start: 64 },
-            { end: 67, start: 67 },
-          ],
-        },
-        {
-          spans: [
-            { end: 62, start: 62 },
-            { end: 67, start: 67 },
-            { end: 71, start: 71 },
-          ],
-        },
-      ],
     );
 
-    expect(overlays[0]).toEqual({
-      marks: [
-        { pitch: 60, type: "root" },
-        { pitch: 60, type: "ground" },
-      ],
-      groundPitchClass: 0,
-      rootPitchClass: 0,
-    });
-    expect(overlays[1]).toEqual({
-      marks: [
-        { pitch: 67, type: "root" },
-        { pitch: 67, type: "ground" },
-      ],
-      groundPitchClass: 7,
-      rootPitchClass: 7,
-    });
+    expect(projection.segments[0]?.placement.projectedGroundingOverlay).toEqual(
+      {
+        marks: [
+          { pitch: 60, type: "root" },
+          { pitch: 60, type: "ground" },
+          { pitch: 72, type: "root" },
+          { pitch: 72, type: "ground" },
+        ],
+        groundPitchClass: 0,
+        rootPitchClass: 0,
+      },
+    );
+    expect(projection.segments[1]?.placement.projectedGroundingOverlay).toEqual(
+      {
+        marks: [
+          { pitch: 67, type: "root" },
+          { pitch: 67, type: "ground" },
+        ],
+        groundPitchClass: 7,
+        rootPitchClass: 7,
+      },
+    );
   });
 
   test("buildProjection annotates adjacent paired spans with joins", () => {

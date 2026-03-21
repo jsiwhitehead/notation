@@ -5,27 +5,16 @@ import type {
   HarmonicStructure,
   PitchClass,
   PieceInput,
-} from "./model";
-import { getEventPitches, repeatPitchClassesAcrossRange } from "./pitch";
+} from "../model";
+import { getEventPitches, repeatPitchClassesAcrossRange } from "../pitch";
 import {
   buildLinkedProjectedRegions,
   type ProjectedRegion,
   type PitchWindow,
 } from "./spans";
 
-export {
-  buildLinkedProjectedRegions,
-  buildRegionSpanClasses,
-  repeatRegionSpanClassesAcrossRange,
-  type PitchWindow,
-  type ProjectedRegion,
-  type ProjectedSpan,
-  type RegionSpanClass,
-  type Span,
-} from "./spans";
-
-const STAFF_PADDING = 1;
-const PIECE_WINDOW_PADDING = 1;
+const EVENT_PITCH_WINDOW_PADDING = 1;
+const VISIBLE_PITCH_WINDOW_PADDING = 1;
 const DEFAULT_PITCH_WINDOW: PitchWindow = { maxPitch: 71, minPitch: 60 };
 
 export type ProjectionEvent =
@@ -45,8 +34,8 @@ export type ProjectionEvent =
 type ProjectionPlacement = {
   center: ProjectedRegion;
   field: ProjectedRegion;
-  groundingOverlay: ProjectedGroundingOverlay | undefined;
-  restPitch: number;
+  projectedGroundingOverlay: ProjectedGroundingOverlay | undefined;
+  restAnchorPitch: number;
 };
 
 type ProjectionHarmonic = {
@@ -92,7 +81,7 @@ export function buildProjection(
   const segments: ProjectionSegment[] = input.segments.map((segment, index) => {
     const harmonicSegment = harmonicStructure.segments[index]!;
     const placement = projectedPlacements[index]!;
-    const events = buildProjectionEvents(segment, placement.restPitch);
+    const events = buildProjectionEvents(segment, placement.restAnchorPitch);
 
     return {
       events: events.events,
@@ -135,8 +124,8 @@ function buildProjectedPlacements(
   return harmonicStructure.segments.map((_, index) => ({
     center: projectedCenters[index]!,
     field: projectedFields[index]!,
-    groundingOverlay: projectedGroundingOverlays[index],
-    restPitch: Math.round(
+    projectedGroundingOverlay: projectedGroundingOverlays[index],
+    restAnchorPitch: Math.round(
       (visibleWindow.maxPitch + visibleWindow.minPitch) / 2,
     ),
   }));
@@ -154,12 +143,12 @@ function getPitchWindow(input: PieceInput): PitchWindow {
 
 function getPaddedPieceWindow(window: PitchWindow): PitchWindow {
   return {
-    maxPitch: window.maxPitch + PIECE_WINDOW_PADDING,
-    minPitch: window.minPitch - PIECE_WINDOW_PADDING,
+    maxPitch: window.maxPitch + VISIBLE_PITCH_WINDOW_PADDING,
+    minPitch: window.minPitch - VISIBLE_PITCH_WINDOW_PADDING,
   };
 }
 
-export function buildProjectedGroundingOverlays(
+function buildProjectedGroundingOverlays(
   harmonicStructure: HarmonicStructure,
   projectedCenters: ProjectedRegion[],
   projectedFields: ProjectedRegion[],
@@ -181,8 +170,8 @@ function getPaddedPitchWindow(pitches: number[]): PitchWindow | undefined {
   }
 
   return {
-    maxPitch: Math.max(...pitches) + STAFF_PADDING,
-    minPitch: Math.min(...pitches) - STAFF_PADDING,
+    maxPitch: Math.max(...pitches) + EVENT_PITCH_WINDOW_PADDING,
+    minPitch: Math.min(...pitches) - EVENT_PITCH_WINDOW_PADDING,
   };
 }
 

@@ -1,11 +1,11 @@
-import type { HarmonicRegion, PitchClass } from "./model";
+import type { HarmonicRegion, PitchClass } from "../model";
 import {
   getLargestFifthsGap,
   getOrderedFifthsPositions,
   mod,
   toFifthsPosition,
   toPitchClassFromFifthsPosition,
-} from "./pitch";
+} from "../pitch";
 
 export type PitchWindow = {
   maxPitch: number;
