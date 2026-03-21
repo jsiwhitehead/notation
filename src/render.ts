@@ -6,27 +6,56 @@ import {
   type Span,
 } from "./projection";
 import { regionToColor, regionToWheel24, wheel24ToDarkColor } from "./color";
+import {
+  getEngravingDefaults,
+  getMusicFontFamily,
+  getSmuflAnchor,
+  getSmuflGlyphBox,
+  getSmuflGlyphCharacter,
+} from "./smufl";
 const SVG_NS = "http://www.w3.org/2000/svg";
 
-// Layout scale:
-// - ROW_HEIGHT is the vertical semitone spacing
-// - NOTE_RADIUS sets note size
-// - SPAN_TUCK / SEGMENT_SEAM / JOIN_CONTROL_X_RATIO tune region readability
-const JOIN_CONTROL_X_RATIO = 0.65;
-const HORIZONTAL_PADDING = 28;
-const SEGMENT_SEAM = 1;
-const SEGMENT_GAP = 20;
-const SEGMENT_WIDTH = 120;
-const VERTICAL_PADDING = 100;
-const ROW_HEIGHT = 3;
-const NOTE_RADIUS = 4;
-const MIN_EVENT_WIDTH = 12;
-const REST_WIDTH = 14;
-const REST_HEIGHT = 2;
-const GROUNDING_MARK_HEIGHT = 3;
-const GROUNDING_MARK_WIDTH = 10;
-const SPAN_CLEARANCE = 0.5;
-const SPAN_TUCK = Math.max(0, NOTE_RADIUS - ROW_HEIGHT) + SPAN_CLEARANCE;
+// Render units.
+const PITCH_STEP_HEIGHT_PX = 3;
+const NOTEHEAD_HEIGHT_PX = 8;
+const NOTEHEAD_BLACK_BOX = getSmuflGlyphBox("noteheadBlack");
+const NOTEHEAD_BLACK = {
+  center: {
+    x: (NOTEHEAD_BLACK_BOX.sw.x + NOTEHEAD_BLACK_BOX.ne.x) / 2,
+    y: (NOTEHEAD_BLACK_BOX.sw.y + NOTEHEAD_BLACK_BOX.ne.y) / 2,
+  },
+  character: getSmuflGlyphCharacter("noteheadBlack"),
+  heightStaffSpaces: NOTEHEAD_BLACK_BOX.ne.y - NOTEHEAD_BLACK_BOX.sw.y,
+  stemUpSE: getSmuflAnchor("noteheadBlack", "stemUpSE")!,
+};
+const PX_PER_STAFF_SPACE =
+  NOTEHEAD_HEIGHT_PX / NOTEHEAD_BLACK.heightStaffSpaces;
+const MUSIC_GLYPH_FONT_SIZE_PX = PX_PER_STAFF_SPACE * 4;
+const ENGRAVING_DEFAULTS = getEngravingDefaults();
+
+// Engraving units.
+const STEM_LENGTH_STAFF_SPACES = 3.5;
+
+// Score layout.
+const HORIZONTAL_PADDING_PX = 28;
+const VERTICAL_PADDING_PX = 100;
+const SEGMENT_WIDTH_PX = 120;
+const SEGMENT_GAP_PX = 20;
+const SEGMENT_SEAM_PX = 1;
+const JOIN_CURVE_CONTROL_X_RATIO = 0.65;
+
+// Event and mark dimensions.
+const MIN_EVENT_WIDTH_PX = 12;
+const REST_WIDTH_PX = 14;
+const REST_HEIGHT_PX = 2;
+const GROUNDING_MARK_HEIGHT_PX = 3;
+const GROUNDING_MARK_WIDTH_PX = 10;
+
+// Span readability tuning.
+const SPAN_CLEARANCE_PX = 0.5;
+const SPAN_EVENT_CLEARANCE_PX =
+  Math.max(0, NOTEHEAD_HEIGHT_PX / 2 - PITCH_STEP_HEIGHT_PX) +
+  SPAN_CLEARANCE_PX;
 
 type ScoreLayout = {
   height: number;
@@ -73,11 +102,15 @@ function setAttributes(
 }
 
 function getYForPitch(maxPitch: number, pitch: number): number {
-  return VERTICAL_PADDING + (maxPitch - pitch) * ROW_HEIGHT;
+  return VERTICAL_PADDING_PX + (maxPitch - pitch) * PITCH_STEP_HEIGHT_PX;
 }
 
 function getXForSegment(index: number): number {
-  return HORIZONTAL_PADDING + index * (SEGMENT_WIDTH + SEGMENT_GAP);
+  return HORIZONTAL_PADDING_PX + index * (SEGMENT_WIDTH_PX + SEGMENT_GAP_PX);
+}
+
+function staffSpacesToPx(value: number): number {
+  return value * PX_PER_STAFF_SPACE;
 }
 
 function getCenterDarkColor(projectedSegment: ProjectionSegment): string {
@@ -90,19 +123,21 @@ function getCenterDarkColor(projectedSegment: ProjectionSegment): string {
 
 function getSeamX(segmentIndex: number, segmentCount: number): number {
   if (segmentIndex < 0) {
-    return getXForSegment(0) - SEGMENT_GAP / 2;
+    return getXForSegment(0) - SEGMENT_GAP_PX / 2;
   }
 
   if (segmentIndex >= segmentCount - 1) {
-    return getXForSegment(segmentCount - 1) + SEGMENT_WIDTH + SEGMENT_GAP / 2;
+    return (
+      getXForSegment(segmentCount - 1) + SEGMENT_WIDTH_PX + SEGMENT_GAP_PX / 2
+    );
   }
 
-  return getXForSegment(segmentIndex) + SEGMENT_WIDTH + SEGMENT_GAP / 2;
+  return getXForSegment(segmentIndex) + SEGMENT_WIDTH_PX + SEGMENT_GAP_PX / 2;
 }
 
 function getSpanRect(maxPitch: number, span: Span): SpanRect {
-  const top = getYForPitch(maxPitch, span.end) + SPAN_TUCK;
-  const bottom = getYForPitch(maxPitch, span.start) - SPAN_TUCK;
+  const top = getYForPitch(maxPitch, span.end) + SPAN_EVENT_CLEARANCE_PX;
+  const bottom = getYForPitch(maxPitch, span.start) - SPAN_EVENT_CLEARANCE_PX;
   const height = bottom - top;
 
   return {
@@ -125,14 +160,14 @@ function appendGroundMark(
 ): void {
   const rect = createSvgElement("rect");
   const y = getYForPitch(maxPitch, pitch);
-  const x = segmentX - SEGMENT_GAP / 2;
+  const x = segmentX - SEGMENT_GAP_PX / 2;
 
   setAttributes(rect, {
     fill,
-    height: GROUNDING_MARK_HEIGHT,
-    width: GROUNDING_MARK_WIDTH,
+    height: GROUNDING_MARK_HEIGHT_PX,
+    width: GROUNDING_MARK_WIDTH_PX,
     x,
-    y: y - GROUNDING_MARK_HEIGHT / 2,
+    y: y - GROUNDING_MARK_HEIGHT_PX / 2,
   });
 
   group.append(rect);
@@ -146,12 +181,12 @@ function appendRest(
   pitch: number,
 ): void {
   const rect = createSvgElement("rect");
-  const y = getYForPitch(maxPitch, pitch) - REST_HEIGHT / 2;
-  const rectWidth = Math.max(REST_WIDTH, width);
+  const y = getYForPitch(maxPitch, pitch) - REST_HEIGHT_PX / 2;
+  const rectWidth = Math.max(REST_WIDTH_PX, width);
 
   setAttributes(rect, {
     fill: "#666666",
-    height: REST_HEIGHT,
+    height: REST_HEIGHT_PX,
     width: rectWidth,
     x: centerX - rectWidth / 2,
     y,
@@ -188,7 +223,7 @@ function getProjectedSpanPath(
   segmentX: number,
   projectedSpan: ProjectedSpan,
 ): string | undefined {
-  const joinExtension = SEGMENT_GAP / 2;
+  const joinExtension = SEGMENT_GAP_PX / 2;
   const currentRect = getSpanRect(maxPitch, projectedSpan);
 
   if (!isDrawableSpanRect(currentRect)) {
@@ -219,7 +254,7 @@ function getProjectedSpanPath(
     segmentX - (projectedSpan.prev === undefined ? joinExtension : 0);
   const rightX =
     segmentX +
-    SEGMENT_WIDTH +
+    SEGMENT_WIDTH_PX +
     (projectedSpan.next === undefined ? joinExtension : 0);
 
   return [
@@ -358,14 +393,14 @@ function getFullJoinCurves(
   }
 
   const currentEdgeX =
-    direction === "next" ? segmentX + SEGMENT_WIDTH : segmentX;
+    direction === "next" ? segmentX + SEGMENT_WIDTH_PX : segmentX;
   const joinedEdgeX =
-    currentEdgeX + (direction === "next" ? SEGMENT_GAP : -SEGMENT_GAP);
+    currentEdgeX + (direction === "next" ? SEGMENT_GAP_PX : -SEGMENT_GAP_PX);
   const leftX = Math.min(currentEdgeX, joinedEdgeX);
   const rightX = Math.max(currentEdgeX, joinedEdgeX);
   const leftRect = currentEdgeX <= joinedEdgeX ? currentRect : joinedRect;
   const rightRect = currentEdgeX <= joinedEdgeX ? joinedRect : currentRect;
-  const joinControlX = SEGMENT_GAP * JOIN_CONTROL_X_RATIO;
+  const joinControlX = SEGMENT_GAP_PX * JOIN_CURVE_CONTROL_X_RATIO;
   const fullTopCurve: CubicCurve = [
     { x: leftX, y: leftRect.top },
     { x: leftX + joinControlX, y: leftRect.top },
@@ -404,18 +439,66 @@ function appendNote(
   centerX: number,
   maxPitch: number,
   pitch: number,
-): void {
-  const circle = createSvgElement("circle");
+): { originX: number; originY: number } {
+  const notehead = createSvgElement("text");
   const y = getYForPitch(maxPitch, pitch);
+  const originX = centerX - staffSpacesToPx(NOTEHEAD_BLACK.center.x);
+  const originY = y + staffSpacesToPx(NOTEHEAD_BLACK.center.y);
 
-  setAttributes(circle, {
-    cx: centerX,
-    cy: y,
+  setAttributes(notehead, {
     fill: "#111111",
-    r: NOTE_RADIUS,
+    "font-family": getMusicFontFamily(),
+    "font-size": MUSIC_GLYPH_FONT_SIZE_PX,
+    x: originX,
+    y: originY,
+  });
+  notehead.textContent = NOTEHEAD_BLACK.character;
+
+  group.append(notehead);
+
+  return { originX, originY };
+}
+
+function appendStem(
+  group: SVGGElement,
+  noteheadOrigin: { originX: number; originY: number },
+): void {
+  const stem = createSvgElement("line");
+  const stemLength = staffSpacesToPx(STEM_LENGTH_STAFF_SPACES);
+  const stemThickness = staffSpacesToPx(ENGRAVING_DEFAULTS.stemThickness);
+  const anchorX =
+    noteheadOrigin.originX + staffSpacesToPx(NOTEHEAD_BLACK.stemUpSE.x);
+  const anchorY =
+    noteheadOrigin.originY - staffSpacesToPx(NOTEHEAD_BLACK.stemUpSE.y);
+  const stemRightX = anchorX;
+  const stemLeftX = stemRightX - stemThickness;
+  const stemCenterX = (stemLeftX + stemRightX) / 2;
+  const stemBottomY = anchorY;
+  const stemTopY = stemBottomY - stemLength;
+
+  setAttributes(stem, {
+    stroke: "#111111",
+    "stroke-linecap": "butt",
+    "stroke-width": stemThickness,
+    x1: stemCenterX,
+    x2: stemCenterX,
+    y1: stemBottomY,
+    y2: stemTopY,
   });
 
-  group.append(circle);
+  group.append(stem);
+}
+
+function appendPitchedEvent(
+  group: SVGGElement,
+  centerX: number,
+  maxPitch: number,
+  pitches: number[],
+): void {
+  pitches.forEach((pitch) => {
+    const noteheadOrigin = appendNote(group, centerX, maxPitch, pitch);
+    appendStem(group, noteheadOrigin);
+  });
 }
 
 function appendEventMark(
@@ -427,20 +510,18 @@ function appendEventMark(
 ): void {
   const startX =
     segmentX +
-    (projectedEvent.offset / projectedSegment.totalDuration) * SEGMENT_WIDTH;
+    (projectedEvent.offset / projectedSegment.totalDuration) * SEGMENT_WIDTH_PX;
   const endX =
     segmentX +
     ((projectedEvent.offset + projectedEvent.duration) /
       projectedSegment.totalDuration) *
-      SEGMENT_WIDTH;
+      SEGMENT_WIDTH_PX;
   const centerX = (startX + endX) / 2;
-  const width = Math.max(endX - startX, MIN_EVENT_WIDTH);
+  const width = Math.max(endX - startX, MIN_EVENT_WIDTH_PX);
 
   switch (projectedEvent.type) {
     case "pitched":
-      projectedEvent.pitches.forEach((pitch) => {
-        appendNote(group, centerX, maxPitch, pitch);
-      });
+      appendPitchedEvent(group, centerX, maxPitch, projectedEvent.pitches);
       return;
     case "rest":
       appendRest(group, centerX, width, maxPitch, projectedEvent.pitch);
@@ -469,7 +550,7 @@ function appendSegmentForeground(
     fill: "#111111",
     "font-size": 12,
     x: segmentX,
-    y: VERTICAL_PADDING - 10,
+    y: VERTICAL_PADDING_PX - 10,
   });
   label.textContent = String(projectedSegment.index + 1);
 
@@ -517,8 +598,8 @@ function appendSegmentBoundarySeam(
   setAttributes(rect, {
     fill: "#ffffff",
     height: layout.height,
-    width: SEGMENT_SEAM,
-    x: seamX - SEGMENT_SEAM / 2,
+    width: SEGMENT_SEAM_PX,
+    x: seamX - SEGMENT_SEAM_PX / 2,
     y: 0,
   });
 
@@ -540,14 +621,14 @@ function appendAllSegmentSeams(
 function getScoreLayout(projection: Projection): ScoreLayout {
   return {
     height:
-      VERTICAL_PADDING * 2 +
-      (projection.maxPitch - projection.minPitch) * ROW_HEIGHT,
+      VERTICAL_PADDING_PX * 2 +
+      (projection.maxPitch - projection.minPitch) * PITCH_STEP_HEIGHT_PX,
     maxPitch: projection.maxPitch,
     minPitch: projection.minPitch,
     width:
-      HORIZONTAL_PADDING * 2 +
-      projection.segments.length * SEGMENT_WIDTH +
-      Math.max(projection.segments.length - 1, 0) * SEGMENT_GAP,
+      HORIZONTAL_PADDING_PX * 2 +
+      projection.segments.length * SEGMENT_WIDTH_PX +
+      Math.max(projection.segments.length - 1, 0) * SEGMENT_GAP_PX,
   };
 }
 

@@ -5,6 +5,7 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "moduleDetection": "force",
+    "resolveJsonModule": true,
 
     "verbatimModuleSyntax": true,
     "allowImportingTsExtensions": true,
@@ -23,6 +24,6 @@
 
     "skipLibCheck": true
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "include": ["src/**/*.json", "src/**/*.ts", "test/**/*.ts"],
   "exclude": ["node_modules"]
 }
