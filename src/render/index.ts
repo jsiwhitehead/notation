@@ -1,41 +1,27 @@
-import { type Projection, type ProjectionSegment } from "../projection";
+import { type Projection } from "../projection";
 import { appendProjectedEvent } from "./events";
+import type { NotationLayout, RenderSegmentLayout } from "./layout";
 import {
-  getEventCenterX,
-  getSeamX,
-  getXForSegment,
+  getSegmentWidthPx,
   HORIZONTAL_PADDING_PX,
   PITCH_STEP_HEIGHT_PX,
   SEGMENT_GAP_PX,
   SEGMENT_SEAM_PX,
-  SEGMENT_WIDTH_PX,
   VERTICAL_PADDING_PX,
 } from "./metrics";
 import { appendProjectedSegmentRegions } from "./regions";
 import { createSvgElement, setAttributes } from "./svg";
 
-type ScoreLayout = {
-  height: number;
-  maxPitch: number;
-  minPitch: number;
-  width: number;
-};
-
 function appendSegmentForeground(
   group: SVGGElement,
-  layout: ScoreLayout,
-  projectedSegment: ProjectionSegment,
+  layout: NotationLayout,
+  renderSegmentLayout: RenderSegmentLayout,
 ): void {
-  const segmentX = getXForSegment(projectedSegment.index);
   const label = createSvgElement("text");
+  const { segment, widthPx, x } = renderSegmentLayout;
 
-  projectedSegment.events.forEach((projectedEvent) => {
-    const centerX = getEventCenterX(
-      segmentX,
-      projectedSegment.totalDuration,
-      projectedEvent.offset,
-      projectedEvent.duration,
-    );
+  segment.events.forEach((projectedEvent) => {
+    const centerX = x + projectedEvent.x * widthPx;
 
     appendProjectedEvent(group, centerX, layout.maxPitch, projectedEvent);
   });
@@ -43,22 +29,20 @@ function appendSegmentForeground(
   setAttributes(label, {
     fill: "#111111",
     "font-size": 12,
-    x: segmentX,
+    x,
     y: VERTICAL_PADDING_PX - 10,
   });
-  label.textContent = String(projectedSegment.index + 1);
+  label.textContent = String(segment.index + 1);
 
   group.append(label);
 }
 
 function appendSegmentBoundarySeam(
   group: SVGGElement,
-  layout: ScoreLayout,
-  segmentIndex: number,
-  segmentCount: number,
+  layout: NotationLayout,
+  seamX: number,
 ): void {
   const rect = createSvgElement("rect");
-  const seamX = getSeamX(segmentIndex, segmentCount);
 
   setAttributes(rect, {
     fill: "#ffffff",
@@ -73,17 +57,25 @@ function appendSegmentBoundarySeam(
 
 function appendAllSegmentSeams(
   group: SVGGElement,
-  layout: ScoreLayout,
-  segmentCount: number,
+  layout: NotationLayout,
+  renderSegmentLayouts: RenderSegmentLayout[],
 ): void {
-  appendSegmentBoundarySeam(group, layout, -1, segmentCount);
+  const seamXs = getSeamXs(renderSegmentLayouts);
 
-  for (let segmentIndex = 0; segmentIndex < segmentCount; segmentIndex += 1) {
-    appendSegmentBoundarySeam(group, layout, segmentIndex, segmentCount);
-  }
+  seamXs.forEach((seamX) => {
+    appendSegmentBoundarySeam(group, layout, seamX);
+  });
 }
 
-function getScoreLayout(projection: Projection): ScoreLayout {
+function getNotationLayout(
+  projection: Projection,
+  renderSegmentLayouts: RenderSegmentLayout[],
+): NotationLayout {
+  const totalSegmentWidth = renderSegmentLayouts.reduce(
+    (sum, renderSegmentLayout) => sum + renderSegmentLayout.widthPx,
+    0,
+  );
+
   return {
     height:
       VERTICAL_PADDING_PX * 2 +
@@ -92,40 +84,72 @@ function getScoreLayout(projection: Projection): ScoreLayout {
     minPitch: projection.minPitch,
     width:
       HORIZONTAL_PADDING_PX * 2 +
-      projection.segments.length * SEGMENT_WIDTH_PX +
-      Math.max(projection.segments.length - 1, 0) * SEGMENT_GAP_PX,
+      totalSegmentWidth +
+      Math.max(renderSegmentLayouts.length - 1, 0) * SEGMENT_GAP_PX,
   };
 }
 
-function createScoreSvg(projection: Projection): SVGSVGElement {
+function getRenderSegmentLayouts(
+  projection: Projection,
+): RenderSegmentLayout[] {
+  const renderSegmentLayouts: RenderSegmentLayout[] = [];
+  let currentX = HORIZONTAL_PADDING_PX;
+
+  projection.segments.forEach((segment) => {
+    const widthPx = getSegmentWidthPx(segment.segmentWidthUnits);
+
+    renderSegmentLayouts.push({
+      segment,
+      widthPx,
+      x: currentX,
+    });
+    currentX += widthPx + SEGMENT_GAP_PX;
+  });
+
+  return renderSegmentLayouts;
+}
+
+function getSeamXs(renderSegmentLayouts: RenderSegmentLayout[]): number[] {
+  if (renderSegmentLayouts.length === 0) {
+    return [];
+  }
+
+  const seamXs = [renderSegmentLayouts[0]!.x - SEGMENT_GAP_PX / 2];
+
+  renderSegmentLayouts.forEach((renderSegmentLayout) => {
+    seamXs.push(
+      renderSegmentLayout.x + renderSegmentLayout.widthPx + SEGMENT_GAP_PX / 2,
+    );
+  });
+
+  return seamXs;
+}
+
+function createNotationSvg(projection: Projection): SVGSVGElement {
   const svg = createSvgElement("svg");
   const regionGroup = createSvgElement("g");
   const seamGroup = createSvgElement("g");
   const foregroundGroup = createSvgElement("g");
-  const layout = getScoreLayout(projection);
+  const renderSegmentLayouts = getRenderSegmentLayouts(projection);
+  const layout = getNotationLayout(projection, renderSegmentLayouts);
 
   svg.setAttribute("viewBox", `0 0 ${layout.width} ${layout.height}`);
   svg.setAttribute("width", String(layout.width));
   svg.setAttribute("height", String(layout.height));
   svg.setAttribute("role", "img");
-  svg.setAttribute("aria-label", "Simple harmonic score");
+  svg.setAttribute("aria-label", "Simple harmonic notation view");
 
-  projection.segments.forEach((projectedSegment) => {
+  renderSegmentLayouts.forEach((renderSegmentLayout) => {
     const group = createSvgElement("g");
-    appendProjectedSegmentRegions(
-      group,
-      layout.maxPitch,
-      getXForSegment(projectedSegment.index),
-      projectedSegment,
-    );
+    appendProjectedSegmentRegions(group, layout, renderSegmentLayout);
     regionGroup.append(group);
   });
 
-  appendAllSegmentSeams(seamGroup, layout, projection.segments.length);
+  appendAllSegmentSeams(seamGroup, layout, renderSegmentLayouts);
 
-  projection.segments.forEach((projectedSegment) => {
+  renderSegmentLayouts.forEach((renderSegmentLayout) => {
     const group = createSvgElement("g");
-    appendSegmentForeground(group, layout, projectedSegment);
+    appendSegmentForeground(group, layout, renderSegmentLayout);
     foregroundGroup.append(group);
   });
 
@@ -137,13 +161,13 @@ function createScoreSvg(projection: Projection): SVGSVGElement {
 export function renderApp(projection: Projection): HTMLElement {
   const app = document.createElement("main");
   const heading = document.createElement("h1");
-  const score = document.createElement("div");
+  const notationView = document.createElement("div");
 
   app.className = "app";
   heading.textContent = "Notation";
-  score.className = "score";
-  score.append(createScoreSvg(projection));
+  notationView.className = "notation-view";
+  notationView.append(createNotationSvg(projection));
 
-  app.append(heading, score);
+  app.append(heading, notationView);
   return app;
 }

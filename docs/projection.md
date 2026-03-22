@@ -32,7 +32,7 @@ In the current code, that shape is `Projection`, which currently contains:
 
 - `minPitch` and `maxPitch` for the visible pitch range
 - ordered segments
-- for each segment: preserved `events`, `totalDuration`, carried harmonic structure, and a render-ready `placement`
+- for each segment: preserved `events`, ordered `timePositions`, `segmentWidthUnits`, `totalDuration`, carried harmonic structure, and a render-ready `placement`
 
 The carried harmonic structure remains analysis-native and currently contains:
 
@@ -46,6 +46,8 @@ The carried harmonic structure remains analysis-native and currently contains:
 - projected `field` region span objects
 - projected `center` region span objects
 - optional projected grounding overlay data for projected `root` and `ground` marks
+
+Projected events currently also carry a segment-local x-position derived from projection-owned time-position spacing. Ordered `timePositions` expose the shared onset structure that spacing is built from, and `segmentWidthUnits` carries the segment-level width demand derived from that spacing in projection-local layout units.
 
 Each projected harmonic region currently contains:
 
@@ -79,12 +81,15 @@ In the current implementation, projection:
 1. derives a visible pitch range from events
 2. computes event offsets layer by layer when offsets are not explicitly authored
 3. preserves durations and simultaneities in the resulting events
-4. chooses one shared visible window for the piece and a local rest anchor per segment
-5. projects harmonic field spans, center spans, and optional grounding overlays into visible pitch-space
-6. repeats harmonic spans as whole spans across the visible window rather than clipping spans partway through
-7. preserves projected harmonic spans as render-facing span objects, including degenerate zero-height spans
-8. resolves adjacent-span joins inside projection and attaches neighboring span geometry directly to projected spans
-9. allows those neighboring span geometries to extend beyond the nominal visible window when a full-span continuation falls just above or below it
-10. derives projected `root` and `ground` marks from `grounding` within the segment's projected harmonic span extent when grounding is present
-11. carries forward singular harmonic field, singular harmonic center, and optional grounding
-12. emits projection as the unified structure consumed by the renderer
+4. derives ordered shared time positions from event offsets inside each segment
+5. computes simple segment-local x-positions for projected events from those shared time positions
+6. derives a simple segment width from time-position spacing demand
+7. chooses one shared visible window for the piece and a local rest anchor per segment
+8. projects harmonic field spans, center spans, and optional grounding overlays into visible pitch-space
+9. repeats harmonic spans as whole spans across the visible window rather than clipping spans partway through
+10. preserves projected harmonic spans as render-facing span objects, including degenerate zero-height spans
+11. resolves adjacent-span joins inside projection and attaches neighboring span geometry directly to projected spans
+12. allows those neighboring span geometries to extend beyond the nominal visible window when a full-span continuation falls just above or below it
+13. derives projected `root` and `ground` marks from `grounding` within the segment's projected harmonic span extent when grounding is present
+14. carries forward singular harmonic field, singular harmonic center, and optional grounding
+15. emits projection as the unified structure consumed by the renderer

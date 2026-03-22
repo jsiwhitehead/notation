@@ -1,12 +1,11 @@
-import { type ProjectionSegment } from "../projection";
 import type { ProjectedSpan, Span } from "../projection/spans";
+import type { NotationLayout, RenderSegmentLayout } from "./layout";
 import {
   GROUNDING_MARK_HEIGHT_PX,
   GROUNDING_MARK_WIDTH_PX,
   getYForPitch,
   JOIN_CURVE_CONTROL_X_RATIO,
   SEGMENT_GAP_PX,
-  SEGMENT_WIDTH_PX,
   SPAN_EVENT_CLEARANCE_PX,
 } from "./metrics";
 import { regionToColor, regionToWheel24, wheel24ToDarkColor } from "./color";
@@ -34,10 +33,8 @@ type RegionPaint = {
 
 type CubicCurve = [Point, Point, Point, Point];
 
-function getCenterDarkColor(projectedSegment: ProjectionSegment): string {
-  const wheelIndex = regionToWheel24(
-    projectedSegment.harmonic.center.pitchClasses,
-  );
+function getCenterDarkColor(centerPitchClasses: number[]): string {
+  const wheelIndex = regionToWheel24(centerPitchClasses);
 
   return wheelIndex === undefined ? "#111111" : wheel24ToDarkColor(wheelIndex);
 }
@@ -84,10 +81,16 @@ function appendProjectedSpan(
   group: SVGGElement,
   maxPitch: number,
   segmentX: number,
+  segmentWidth: number,
   projectedSpan: ProjectedSpan,
   paint: RegionPaint,
 ): void {
-  const d = getProjectedSpanPath(maxPitch, segmentX, projectedSpan);
+  const d = getProjectedSpanPath(
+    maxPitch,
+    segmentX,
+    segmentWidth,
+    projectedSpan,
+  );
 
   if (d === undefined) {
     return;
@@ -106,6 +109,7 @@ function appendProjectedSpan(
 function getProjectedSpanPath(
   maxPitch: number,
   segmentX: number,
+  segmentWidth: number,
   projectedSpan: ProjectedSpan,
 ): string | undefined {
   const joinExtension = SEGMENT_GAP_PX / 2;
@@ -121,6 +125,7 @@ function getProjectedSpanPath(
       : getJoinHalf(
           maxPitch,
           segmentX,
+          segmentWidth,
           projectedSpan,
           projectedSpan.prev,
           "prev",
@@ -131,6 +136,7 @@ function getProjectedSpanPath(
       : getJoinHalf(
           maxPitch,
           segmentX,
+          segmentWidth,
           projectedSpan,
           projectedSpan.next,
           "next",
@@ -139,7 +145,7 @@ function getProjectedSpanPath(
     segmentX - (projectedSpan.prev === undefined ? joinExtension : 0);
   const rightX =
     segmentX +
-    SEGMENT_WIDTH_PX +
+    segmentWidth +
     (projectedSpan.next === undefined ? joinExtension : 0);
 
   return [
@@ -214,6 +220,7 @@ function getHalfCubicCommand(
 function getJoinHalf(
   maxPitch: number,
   segmentX: number,
+  segmentWidth: number,
   currentSpan: Span,
   joinedSpan: Span,
   direction: "next" | "prev",
@@ -228,6 +235,7 @@ function getJoinHalf(
   const fullJoinCurves = getFullJoinCurves(
     maxPitch,
     segmentX,
+    segmentWidth,
     currentSpan,
     joinedSpan,
     direction,
@@ -261,6 +269,7 @@ function getJoinHalf(
 function getFullJoinCurves(
   maxPitch: number,
   segmentX: number,
+  segmentWidth: number,
   currentSpan: Span,
   joinedSpan: Span,
   direction: "next" | "prev",
@@ -278,7 +287,7 @@ function getFullJoinCurves(
   }
 
   const currentEdgeX =
-    direction === "next" ? segmentX + SEGMENT_WIDTH_PX : segmentX;
+    direction === "next" ? segmentX + segmentWidth : segmentX;
   const joinedEdgeX =
     currentEdgeX + (direction === "next" ? SEGMENT_GAP_PX : -SEGMENT_GAP_PX);
   const leftX = Math.min(currentEdgeX, joinedEdgeX);
@@ -314,32 +323,58 @@ function getCenterPaint(color: string): RegionPaint {
   return {
     layers: [
       { fill: "#ffffff", opacity: 1 },
-      { fill: color, opacity: 0.5 },
+      { fill: color, opacity: 0.7 },
     ],
   };
 }
 
 export function appendProjectedSegmentRegions(
   group: SVGGElement,
-  maxPitch: number,
-  segmentX: number,
-  projectedSegment: ProjectionSegment,
+  layout: NotationLayout,
+  renderSegmentLayout: RenderSegmentLayout,
 ): void {
+  const {
+    segment: projectedSegment,
+    widthPx: segmentWidth,
+    x: segmentX,
+  } = renderSegmentLayout;
   const centerColor =
     regionToColor(projectedSegment.harmonic.center.pitchClasses) ?? "#111111";
-  const centerDarkColor = getCenterDarkColor(projectedSegment);
+  const centerDarkColor = getCenterDarkColor(
+    projectedSegment.harmonic.center.pitchClasses,
+  );
   const fieldPaint = getFieldPaint();
   const centerPaint = getCenterPaint(centerColor);
 
   projectedSegment.placement.field.spans.forEach((span) => {
-    appendProjectedSpan(group, maxPitch, segmentX, span, fieldPaint);
+    appendProjectedSpan(
+      group,
+      layout.maxPitch,
+      segmentX,
+      segmentWidth,
+      span,
+      fieldPaint,
+    );
   });
   projectedSegment.placement.center.spans.forEach((span) => {
-    appendProjectedSpan(group, maxPitch, segmentX, span, centerPaint);
+    appendProjectedSpan(
+      group,
+      layout.maxPitch,
+      segmentX,
+      segmentWidth,
+      span,
+      centerPaint,
+    );
   });
   projectedSegment.placement.projectedGroundingOverlay?.marks.forEach(
     (mark) => {
-      appendGroundMark(group, centerDarkColor, maxPitch, segmentX, mark.pitch);
+      appendGroundMark(
+        group,
+        centerDarkColor,
+        layout.maxPitch,
+        segmentX,
+        mark.pitch,
+      );
     },
   );
 }

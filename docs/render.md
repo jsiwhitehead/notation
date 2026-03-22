@@ -47,7 +47,8 @@ In the current implementation, rendering:
 5. renders projection-resolved joins between adjacent field and center spans from the absolute neighboring span geometry carried on each projected span
 6. renders projected grounding as uniform short grounding blocks, even though projection still distinguishes `root` and `ground`
 7. derives harmonic hue from one shared 24-step fifth-color wheel with a matched dark companion palette
-8. shapes events from projected offsets and durations into duration-aware noteheads, rests, stems, simple chord displacement, and unbeamed up-flags, then draws that geometry into SVG
-9. emits a simple SVG score view
+8. uses projection-provided segment-local event x-positions and projected segment width units, and converts those width units into renderer px geometry
+9. shapes events from projected durations into duration-aware noteheads, rests, stems, simple chord displacement, and unbeamed up-flags, then draws that geometry into SVG
+10. emits a simple SVG score view
 
-In the current implementation, octave-range repetition, whole-span expansion, join determination, and grounding-mark placement are projection responsibilities. Harmonic color, join geometry, and the segment seam are renderer-level styling derived from projected pitch and region content. The renderer consumes those pitch-space decisions and focuses on screen geometry and visual legibility.
+In the current implementation, octave-range repetition, whole-span expansion, join determination, grounding-mark placement, simple event x-position spacing, and segment width demand are projection responsibilities. Harmonic color, join geometry, and the segment seam are renderer-level styling derived from projected pitch and region content. The renderer consumes those pitch-space decisions and focuses on screen geometry and visual legibility.

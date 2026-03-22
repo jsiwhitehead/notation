@@ -12,7 +12,7 @@ export type PitchWindow = {
   minPitch: number;
 };
 
-export type RegionSpanClass = {
+type RegionSpanClass = {
   end: PitchClass;
   start: PitchClass;
 };
@@ -46,9 +46,7 @@ type BuiltProjectedRegion = {
   pairedSlots?: [BuiltProjectedSlot, BuiltProjectedSlot];
 };
 
-export function buildRegionSpanClasses(
-  region: HarmonicRegion,
-): RegionSpanClass[] {
+function buildRegionSpanClasses(region: HarmonicRegion): RegionSpanClass[] {
   if (region.pitchClasses.length === 0) {
     return [];
   }
@@ -74,7 +72,7 @@ export function buildRegionSpanClasses(
   return spans;
 }
 
-export function repeatRegionSpanClassesAcrossRange(
+function repeatRegionSpanClassesAcrossRange(
   visibleWindow: PitchWindow,
   regionSpanClass: RegionSpanClass,
 ): Span[] {

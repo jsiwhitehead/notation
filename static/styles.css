@@ -62,11 +62,11 @@
     margin-bottom: 20px;
   }
 
-  .score {
+  .notation-view {
     overflow-x: auto;
   }
 
-  .score svg {
+  .notation-view svg {
     display: block;
     max-width: 100%;
     height: auto;

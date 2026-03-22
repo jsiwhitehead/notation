@@ -1,5 +1,5 @@
 import type { PitchClass } from "../model";
-import { getRegionMidpointInHalfFifths, mod, toFifthsPosition } from "../pitch";
+import { getRegionMidpointInHalfFifths, mod } from "../pitch";
 
 const HARMONIC_WHEEL_SIZE = 24;
 const HARMONIC_WHEEL_24 = [
@@ -55,10 +55,6 @@ const HARMONIC_WHEEL_24_DARK = [
   "#df194a",
 ] as const;
 
-export function pitchClassToWheel24(pitchClass: PitchClass): number {
-  return mod(toFifthsPosition(pitchClass) * 2, HARMONIC_WHEEL_SIZE);
-}
-
 export function regionToWheel24(
   pitchClasses: PitchClass[],
 ): number | undefined {
@@ -73,14 +69,6 @@ function wheel24ToColor(wheelIndex: number): string {
 export function wheel24ToDarkColor(wheelIndex: number): string {
   const normalizedIndex = mod(wheelIndex, HARMONIC_WHEEL_SIZE);
   return HARMONIC_WHEEL_24_DARK[normalizedIndex]!;
-}
-
-export function pitchClassToColor(pitchClass: PitchClass): string {
-  return wheel24ToColor(pitchClassToWheel24(pitchClass));
-}
-
-export function pitchClassToDarkColor(pitchClass: PitchClass): string {
-  return wheel24ToDarkColor(pitchClassToWheel24(pitchClass));
 }
 
 export function regionToColor(pitchClasses: PitchClass[]): string | undefined {

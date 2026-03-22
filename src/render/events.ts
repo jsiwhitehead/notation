@@ -36,7 +36,7 @@ type RenderNoteheadGlyph = RenderGlyph & {
 };
 
 type ShapedPitchedNotehead = {
-  centerX: number;
+  centerOffsetStaffSpaces: number;
   pitch: number;
 };
 
@@ -106,7 +106,7 @@ const PX_PER_STAFF_SPACE =
   NOTEHEAD_HEIGHT_PX / NOTEHEAD_BLACK.heightStaffSpaces;
 const MUSIC_GLYPH_FONT_SIZE_PX = PX_PER_STAFF_SPACE * 4;
 const ENGRAVING_DEFAULTS = getEngravingDefaults();
-const STEM_THICKNESS_PX = ENGRAVING_DEFAULTS.stemThickness * PX_PER_STAFF_SPACE;
+const STEM_THICKNESS_STAFF_SPACES = ENGRAVING_DEFAULTS.stemThickness;
 
 // Duration appearance policy for the current renderer.
 const DURATION_APPEARANCES: DurationAppearance[] = [
@@ -177,10 +177,10 @@ function getDurationAppearance(duration: number): DurationAppearance {
   );
 }
 
-function getNoteheadDisplacementPx(noteheadGlyph: RenderNoteheadGlyph): number {
-  return (
-    noteheadGlyph.widthStaffSpaces * PX_PER_STAFF_SPACE - STEM_THICKNESS_PX / 2
-  );
+function getNoteheadDisplacementStaffSpaces(
+  noteheadGlyph: RenderNoteheadGlyph,
+): number {
+  return noteheadGlyph.widthStaffSpaces - STEM_THICKNESS_STAFF_SPACES / 2;
 }
 
 function appendRest(
@@ -196,7 +196,7 @@ function appendRest(
   const originY = y + staffSpacesToPx(glyph.center.y);
 
   setAttributes(rest, {
-    fill: "#666666",
+    fill: "#111111",
     "font-family": getMusicFontFamily(),
     "font-size": MUSIC_GLYPH_FONT_SIZE_PX,
     x: originX,
@@ -239,7 +239,7 @@ function appendStem(group: SVGGElement, stemGeometry: UpStemGeometry): void {
   setAttributes(stem, {
     stroke: "#111111",
     "stroke-linecap": "butt",
-    "stroke-width": STEM_THICKNESS_PX,
+    "stroke-width": staffSpacesToPx(STEM_THICKNESS_STAFF_SPACES),
     x1: stemGeometry.centerX,
     x2: stemGeometry.centerX,
     y1: stemGeometry.anchorY,
@@ -287,18 +287,18 @@ function getUpStemGeometry(
     getYForPitch(maxPitch, stemTipPitch) -
     staffSpacesToPx(stemUpSE.y) -
     staffSpacesToPx(STEM_LENGTH_STAFF_SPACES);
-  const leftX = anchorX - STEM_THICKNESS_PX;
+  const stemThicknessPx = staffSpacesToPx(STEM_THICKNESS_STAFF_SPACES);
+  const leftX = anchorX - stemThicknessPx;
 
   return {
     anchorY,
-    centerX: anchorX - STEM_THICKNESS_PX / 2,
+    centerX: anchorX - stemThicknessPx / 2,
     leftX,
     tipY,
   };
 }
 
 function shapePitchedEvent(
-  centerX: number,
   duration: number,
   pitches: number[],
 ): ShapedPitchedEvent | undefined {
@@ -308,7 +308,8 @@ function shapePitchedEvent(
   const noteheadGlyph = durationAppearance.noteheadGlyph;
   const hasStem = durationAppearance.hasStem;
   const flagGlyph = durationAppearance.flagGlyph;
-  const noteheadDisplacementPx = getNoteheadDisplacementPx(noteheadGlyph);
+  const noteheadDisplacementStaffSpaces =
+    getNoteheadDisplacementStaffSpaces(noteheadGlyph);
 
   sortedPitches.forEach((pitch) => {
     const previousNotehead = noteheads.at(-1);
@@ -318,7 +319,9 @@ function shapePitchedEvent(
         noteheadGlyph.heightStaffSpaces * PX_PER_STAFF_SPACE;
 
     noteheads.push({
-      centerX: overlapsPrevious ? centerX + noteheadDisplacementPx : centerX,
+      centerOffsetStaffSpaces: overlapsPrevious
+        ? noteheadDisplacementStaffSpaces
+        : 0,
       pitch,
     });
   });
@@ -344,7 +347,7 @@ function appendPitchedEvent(
   maxPitch: number,
   pitches: number[],
 ): void {
-  const shapedEvent = shapePitchedEvent(centerX, duration, pitches);
+  const shapedEvent = shapePitchedEvent(duration, pitches);
 
   if (shapedEvent === undefined) {
     return;
@@ -360,7 +363,7 @@ function appendPitchedEvent(
   shapedEvent.noteheads.forEach((notehead) => {
     const noteheadOrigin = appendNote(
       group,
-      notehead.centerX,
+      centerX + staffSpacesToPx(notehead.centerOffsetStaffSpaces),
       maxPitch,
       notehead.pitch,
       shapedEvent.noteheadGlyph,

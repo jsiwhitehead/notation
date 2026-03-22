@@ -1,12 +1,16 @@
 import type {
-  EventOffset,
   Grounding,
   HarmonicRegion,
   HarmonicStructure,
-  PitchClass,
   PieceInput,
 } from "../model";
-import { getEventPitches, repeatPitchClassesAcrossRange } from "../pitch";
+import { getEventPitches } from "../pitch";
+import { buildProjectionEvents, type ProjectionEvent } from "./events";
+import {
+  buildProjectedGroundingOverlays,
+  type ProjectedGroundingOverlay,
+} from "./grounding";
+import type { ProjectionTimePosition } from "./spacing";
 import {
   buildLinkedProjectedRegions,
   type ProjectedRegion,
@@ -16,20 +20,6 @@ import {
 const EVENT_PITCH_WINDOW_PADDING = 1;
 const VISIBLE_PITCH_WINDOW_PADDING = 1;
 const DEFAULT_PITCH_WINDOW: PitchWindow = { maxPitch: 71, minPitch: 60 };
-
-export type ProjectionEvent =
-  | {
-      duration: number;
-      offset: EventOffset;
-      pitches: number[];
-      type: "pitched";
-    }
-  | {
-      duration: number;
-      offset: EventOffset;
-      pitch: number;
-      type: "rest";
-    };
 
 type ProjectionPlacement = {
   center: ProjectedRegion;
@@ -49,6 +39,8 @@ export type ProjectionSegment = {
   index: number;
   events: ProjectionEvent[];
   placement: ProjectionPlacement;
+  segmentWidthUnits: number;
+  timePositions: ProjectionTimePosition[];
   totalDuration: number;
 };
 
@@ -57,17 +49,7 @@ export type Projection = {
   minPitch: number;
   segments: ProjectionSegment[];
 };
-
-type ProjectedGroundingMark = {
-  pitch: number;
-  type: "ground" | "root";
-};
-
-type ProjectedGroundingOverlay = {
-  marks: ProjectedGroundingMark[];
-  groundPitchClass: PitchClass;
-  rootPitchClass: PitchClass;
-};
+export type { ProjectionEvent } from "./events";
 
 export function buildProjection(
   input: PieceInput,
@@ -81,10 +63,13 @@ export function buildProjection(
   const segments: ProjectionSegment[] = input.segments.map((segment, index) => {
     const harmonicSegment = harmonicStructure.segments[index]!;
     const placement = projectedPlacements[index]!;
-    const events = buildProjectionEvents(segment, placement.restAnchorPitch);
+    const projectedEvents = buildProjectionEvents(
+      segment,
+      placement.restAnchorPitch,
+    );
 
     return {
-      events: events.events,
+      events: projectedEvents.events,
       harmonic: {
         center: harmonicSegment.center,
         field: harmonicSegment.field,
@@ -92,7 +77,9 @@ export function buildProjection(
       },
       index,
       placement,
-      totalDuration: events.totalDuration,
+      segmentWidthUnits: projectedEvents.segmentWidthUnits,
+      timePositions: projectedEvents.timePositions,
+      totalDuration: projectedEvents.totalDuration,
     };
   });
 
@@ -148,22 +135,6 @@ function getPaddedPieceWindow(window: PitchWindow): PitchWindow {
   };
 }
 
-function buildProjectedGroundingOverlays(
-  harmonicStructure: HarmonicStructure,
-  projectedCenters: ProjectedRegion[],
-  projectedFields: ProjectedRegion[],
-): (ProjectedGroundingOverlay | undefined)[] {
-  return harmonicStructure.segments.map((segment, index) =>
-    buildProjectedGroundingOverlay(
-      segment.grounding,
-      getProjectedGroundingWindow(
-        projectedCenters[index]!,
-        projectedFields[index]!,
-      ),
-    ),
-  );
-}
-
 function getPaddedPitchWindow(pitches: number[]): PitchWindow | undefined {
   if (pitches.length === 0) {
     return undefined;
@@ -172,109 +143,5 @@ function getPaddedPitchWindow(pitches: number[]): PitchWindow | undefined {
   return {
     maxPitch: Math.max(...pitches) + EVENT_PITCH_WINDOW_PADDING,
     minPitch: Math.min(...pitches) - EVENT_PITCH_WINDOW_PADDING,
-  };
-}
-
-function buildProjectedGroundingOverlay(
-  grounding: Grounding | undefined,
-  projectedGroundingWindow: PitchWindow | undefined,
-): ProjectedGroundingOverlay | undefined {
-  if (grounding === undefined || projectedGroundingWindow === undefined) {
-    return undefined;
-  }
-
-  return {
-    marks: [
-      ...buildProjectedGroundingMarks(
-        projectedGroundingWindow,
-        grounding.root,
-        "root",
-      ),
-      ...buildProjectedGroundingMarks(
-        projectedGroundingWindow,
-        grounding.ground,
-        "ground",
-      ),
-    ].sort((left, right) => left.pitch - right.pitch),
-    groundPitchClass: grounding.ground,
-    rootPitchClass: grounding.root,
-  };
-}
-
-function buildProjectedGroundingMarks(
-  projectedGroundingWindow: PitchWindow,
-  pitchClass: PitchClass,
-  type: ProjectedGroundingMark["type"],
-): ProjectedGroundingMark[] {
-  return repeatPitchClassesAcrossRange(
-    projectedGroundingWindow.maxPitch,
-    projectedGroundingWindow.minPitch,
-    [pitchClass],
-  ).map((pitch) => ({
-    pitch,
-    type,
-  }));
-}
-
-function getProjectedGroundingWindow(
-  projectedCenter: ProjectedRegion,
-  projectedField: ProjectedRegion,
-): PitchWindow | undefined {
-  const projectedSpans = [...projectedCenter.spans, ...projectedField.spans];
-
-  if (projectedSpans.length === 0) {
-    return undefined;
-  }
-
-  return {
-    maxPitch: Math.max(...projectedSpans.map((span) => span.end)),
-    minPitch: Math.min(...projectedSpans.map((span) => span.start)),
-  };
-}
-
-function buildProjectionEvents(
-  segment: PieceInput["segments"][number],
-  middlePitch: number,
-): { events: ProjectionEvent[]; totalDuration: number } {
-  const layerOffsets = new Map<number, number>();
-  let totalDuration = 0;
-
-  const events = segment.events.map((event) => {
-    const layer = event.layer ?? 0;
-    const inferredOffset = layerOffsets.get(layer) ?? 0;
-    const offset = event.offset ?? inferredOffset;
-    const eventEnd = offset + event.duration;
-
-    layerOffsets.set(layer, eventEnd);
-    totalDuration = Math.max(totalDuration, eventEnd);
-
-    switch (event.type) {
-      case "note":
-        return {
-          duration: event.duration,
-          offset,
-          pitches: [event.pitch],
-          type: "pitched" as const,
-        };
-      case "chord":
-        return {
-          duration: event.duration,
-          offset,
-          pitches: event.pitches,
-          type: "pitched" as const,
-        };
-      case "rest":
-        return {
-          duration: event.duration,
-          offset,
-          pitch: middlePitch,
-          type: "rest" as const,
-        };
-    }
-  });
-
-  return {
-    events,
-    totalDuration: Math.max(totalDuration, 1),
   };
 }

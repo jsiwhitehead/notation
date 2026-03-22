@@ -155,6 +155,8 @@ describe("projection", () => {
         field: { pitchClasses: [0, 4, 7] },
         grounding: { ground: 7, root: 0 },
       },
+      segmentWidthUnits: 15,
+      timePositions: [{ maxDuration: 1, offset: 0, x: 0.5 }],
       placement: {
         center: {
           spans: [
@@ -181,6 +183,52 @@ describe("projection", () => {
         restAnchorPitch: 64,
       },
     });
+    expect(projection.segments[0]?.events).toEqual([
+      {
+        duration: 1,
+        offset: 0,
+        pitches: [60, 64, 67],
+        type: "pitched",
+        x: 0.5,
+      },
+    ]);
+  });
+
+  test("buildProjection gives denser segments more width than sparse ones", () => {
+    const projection = buildProjection(
+      {
+        segments: [
+          {
+            events: [{ duration: 4, pitch: 60, type: "note" }],
+          },
+          {
+            events: [
+              { duration: 1, pitch: 60, type: "note" },
+              { duration: 1, pitch: 62, type: "note" },
+              { duration: 1, pitch: 64, type: "note" },
+              { duration: 1, pitch: 65, type: "note" },
+            ],
+          },
+        ],
+      },
+      {
+        segments: [
+          {
+            center: { pitchClasses: [0] },
+            field: { pitchClasses: [0] },
+          },
+          {
+            center: { pitchClasses: [0, 2, 4, 5] },
+            field: { pitchClasses: [0, 2, 4, 5] },
+          },
+        ],
+      },
+    );
+
+    expect(projection.segments[0]!.segmentWidthUnits).toBe(15);
+    expect(projection.segments[1]!.segmentWidthUnits).toBeGreaterThan(
+      projection.segments[0]!.segmentWidthUnits,
+    );
   });
 
   test("buildProjection uses nearby sounded material for rest-only segment defaults", () => {
@@ -221,7 +269,7 @@ describe("projection", () => {
       },
     });
     expect(projection.segments[1]?.events).toEqual([
-      { duration: 2, offset: 0, pitch: 72, type: "rest" },
+      { duration: 2, offset: 0, pitch: 72, type: "rest", x: 0.5 },
     ]);
   });
 
