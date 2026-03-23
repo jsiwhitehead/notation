@@ -66,9 +66,43 @@ function wheel24ToColor(wheelIndex: number): string {
   return HARMONIC_WHEEL_24[normalizedIndex]!;
 }
 
+function clampChannel(value: number): number {
+  return Math.max(0, Math.min(255, Math.round(value)));
+}
+
+function parseRgbColor(color: string): [number, number, number] | undefined {
+  const match = color.match(/^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/);
+
+  if (match === null) {
+    return undefined;
+  }
+
+  const [, red, green, blue] = match;
+
+  return [
+    Number.parseInt(red!, 10),
+    Number.parseInt(green!, 10),
+    Number.parseInt(blue!, 10),
+  ];
+}
+
 export function wheel24ToDarkColor(wheelIndex: number): string {
   const normalizedIndex = mod(wheelIndex, HARMONIC_WHEEL_SIZE);
   return HARMONIC_WHEEL_24_DARK[normalizedIndex]!;
+}
+
+export function flattenColorOverWhite(color: string, alpha: number): string {
+  const parsedColor = parseRgbColor(color);
+
+  if (parsedColor === undefined) {
+    return color;
+  }
+
+  const [red, green, blue] = parsedColor;
+  const flattenChannel = (channel: number): number =>
+    clampChannel(255 - alpha * (255 - channel));
+
+  return `rgb(${flattenChannel(red)}, ${flattenChannel(green)}, ${flattenChannel(blue)})`;
 }
 
 export function regionToColor(pitchClasses: PitchClass[]): string | undefined {

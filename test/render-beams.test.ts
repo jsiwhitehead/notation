@@ -3,15 +3,13 @@ import { describe, expect, test } from "bun:test";
 import type { ProjectionEvent } from "../src/projection";
 import { buildBeamGroups } from "../src/render/beams";
 
-function getPitchedEvent(
-  options: {
-    duration: number;
-    layer?: number;
-    offset: number;
-    pitches?: number[];
-    x?: number;
-  },
-): ProjectionEvent {
+function getPitchedEvent(options: {
+  duration: number;
+  layer?: number;
+  offset: number;
+  pitches?: number[];
+  x?: number;
+}): ProjectionEvent {
   return {
     duration: options.duration,
     layer: options.layer ?? 0,
@@ -22,14 +20,12 @@ function getPitchedEvent(
   };
 }
 
-function getRestEvent(
-  options: {
-    duration: number;
-    layer?: number;
-    offset: number;
-    x?: number;
-  },
-): ProjectionEvent {
+function getRestEvent(options: {
+  duration: number;
+  layer?: number;
+  offset: number;
+  x?: number;
+}): ProjectionEvent {
   return {
     duration: options.duration,
     layer: options.layer ?? 0,

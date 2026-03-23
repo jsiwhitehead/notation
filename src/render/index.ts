@@ -13,14 +13,22 @@ import { appendProjectedSegmentRegions } from "./regions";
 import { createSvgElement, setAttributes } from "./svg";
 
 function appendSegmentForeground(
-  group: SVGGElement,
+  knockoutGroup: SVGGElement,
+  fillGroup: SVGGElement,
+  inkGroup: SVGGElement,
   layout: NotationLayout,
   renderSegmentLayout: RenderSegmentLayout,
 ): void {
   const label = createSvgElement("text");
   const { segment, x } = renderSegmentLayout;
 
-  appendProjectedSegmentEvents(group, layout.maxPitch, renderSegmentLayout);
+  appendProjectedSegmentEvents(
+    knockoutGroup,
+    fillGroup,
+    inkGroup,
+    layout.maxPitch,
+    renderSegmentLayout,
+  );
 
   setAttributes(label, {
     fill: "#111111",
@@ -30,7 +38,7 @@ function appendSegmentForeground(
   });
   label.textContent = String(segment.index + 1);
 
-  group.append(label);
+  inkGroup.append(label);
 }
 
 function appendSegmentBoundarySeam(
@@ -125,6 +133,8 @@ function createNotationSvg(projection: Projection): SVGSVGElement {
   const svg = createSvgElement("svg");
   const regionGroup = createSvgElement("g");
   const seamGroup = createSvgElement("g");
+  const knockoutGroup = createSvgElement("g");
+  const fillGroup = createSvgElement("g");
   const foregroundGroup = createSvgElement("g");
   const renderSegmentLayouts = getRenderSegmentLayouts(projection);
   const layout = getNotationLayout(projection, renderSegmentLayouts);
@@ -144,12 +154,16 @@ function createNotationSvg(projection: Projection): SVGSVGElement {
   appendAllSegmentSeams(seamGroup, layout, renderSegmentLayouts);
 
   renderSegmentLayouts.forEach((renderSegmentLayout) => {
-    const group = createSvgElement("g");
-    appendSegmentForeground(group, layout, renderSegmentLayout);
-    foregroundGroup.append(group);
+    appendSegmentForeground(
+      knockoutGroup,
+      fillGroup,
+      foregroundGroup,
+      layout,
+      renderSegmentLayout,
+    );
   });
 
-  svg.append(regionGroup, seamGroup, foregroundGroup);
+  svg.append(regionGroup, seamGroup, knockoutGroup, fillGroup, foregroundGroup);
 
   return svg;
 }

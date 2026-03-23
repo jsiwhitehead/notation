@@ -1,3 +1,4 @@
+import type { ProjectedSpan } from "../projection/spans";
 import {
   appendBeamGroup,
   buildBeamGroups,
@@ -7,8 +8,10 @@ import { getShortDurationBeamCount } from "./duration";
 import type { RenderSegmentLayout } from "./layout";
 import {
   getYForPitch,
+  NOTEHEAD_KNOCKOUT_STROKE_PX,
   NOTEHEAD_HEIGHT_PX,
   PITCH_STEP_HEIGHT_PX,
+  SPAN_EVENT_CLEARANCE_PX,
 } from "./metrics";
 import { createSvgElement, setAttributes } from "./svg";
 import {
@@ -37,7 +40,25 @@ type RenderGlyph = {
   widthStaffSpaces: number;
 };
 
+const NOTEHEAD_BACKGROUNDS = {
+  noteheadBlack: {
+    pathData:
+      "M0 42C0 85 31 133 112 133C216 133 325 48 325-40C325-99 275-132 213-132C116-132 0-50 0 42Z",
+  },
+  noteheadHalf: {
+    pathData:
+      "M213-132C116-132 0-51 0 42C0 85 31 133 112 133C216 133 325 48 325-40C325-99 275-132 213-132Z",
+  },
+  noteheadWhole: {
+    pathData:
+      "M187-136C49-136 0-66 0-1C0 64 49 134 187 134C325 134 373 64 373-1C373-66 325-136 187-136Z",
+  },
+} as const;
+
+type NoteheadBackgroundName = keyof typeof NOTEHEAD_BACKGROUNDS;
+
 type RenderNoteheadGlyph = RenderGlyph & {
+  name: NoteheadBackgroundName;
   stemUpSE: ReturnType<typeof getAnchor>;
 };
 
@@ -70,6 +91,15 @@ type RenderedPitchedEvent = {
   stemGeometry: UpStemGeometry | undefined;
 };
 
+type NoteheadBounds = {
+  bottom: number;
+  left: number;
+  right: number;
+  top: number;
+};
+
+let nextNoteheadKnockoutClipId = 0;
+
 function getRenderGlyph(name: GlyphName): RenderGlyph {
   const box = getGlyphBox(name);
 
@@ -85,11 +115,14 @@ function getRenderGlyph(name: GlyphName): RenderGlyph {
   };
 }
 
-function getRenderNoteheadGlyph(name: GlyphName): RenderNoteheadGlyph {
+function getRenderNoteheadGlyph(
+  name: NoteheadBackgroundName,
+): RenderNoteheadGlyph {
   const glyph = getRenderGlyph(name);
 
   return {
     ...glyph,
+    name,
     stemUpSE: getAnchor(name, "stemUpSE"),
   };
 }
@@ -221,15 +254,11 @@ function appendRest(
 
 function appendNote(
   group: SVGGElement,
-  centerX: number,
-  maxPitch: number,
-  pitch: number,
   glyph: RenderNoteheadGlyph,
-): { originX: number; originY: number } {
+  originX: number,
+  originY: number,
+): void {
   const notehead = createSvgElement("text");
-  const y = getYForPitch(maxPitch, pitch);
-  const originX = centerX - staffSpacesToPx(glyph.center.x);
-  const originY = y + staffSpacesToPx(glyph.center.y);
 
   setAttributes(notehead, {
     fill: "#111111",
@@ -241,8 +270,162 @@ function appendNote(
   notehead.textContent = glyph.character;
 
   group.append(notehead);
+}
 
-  return { originX, originY };
+function getNoteheadOrigin(
+  centerX: number,
+  maxPitch: number,
+  pitch: number,
+  glyph: RenderNoteheadGlyph,
+): { originX: number; originY: number } {
+  const y = getYForPitch(maxPitch, pitch);
+
+  return {
+    originX: centerX - staffSpacesToPx(glyph.center.x),
+    originY: y + staffSpacesToPx(glyph.center.y),
+  };
+}
+
+function getNoteheadBounds(
+  glyph: RenderNoteheadGlyph,
+  originX: number,
+  originY: number,
+): NoteheadBounds {
+  return {
+    bottom: originY - staffSpacesToPx(glyph.box.sw.y),
+    left: originX + staffSpacesToPx(glyph.box.sw.x),
+    right: originX + staffSpacesToPx(glyph.box.ne.x),
+    top: originY - staffSpacesToPx(glyph.box.ne.y),
+  };
+}
+
+function appendNoteheadKnockout(
+  group: SVGGElement,
+  bounds: NoteheadBounds,
+  clipHeight: number,
+  clipY: number,
+  glyph: RenderNoteheadGlyph,
+  originX: number,
+  originY: number,
+): void {
+  const clipId = `notehead-knockout-${nextNoteheadKnockoutClipId++}`;
+  const defs = createSvgElement("defs");
+  const clipPath = createSvgElement("clipPath");
+  const clipRect = createSvgElement("rect");
+  const knockout = createSvgElement("text");
+
+  setAttributes(clipPath, { id: clipId });
+  setAttributes(clipRect, {
+    height: clipHeight,
+    width: bounds.right - bounds.left + NOTEHEAD_KNOCKOUT_STROKE_PX * 2,
+    x: bounds.left - NOTEHEAD_KNOCKOUT_STROKE_PX,
+    y: clipY,
+  });
+  clipPath.append(clipRect);
+  defs.append(clipPath);
+
+  setAttributes(knockout, {
+    "clip-path": `url(#${clipId})`,
+    fill: "#111111",
+    "font-family": getMusicFontFamily(),
+    "font-size": MUSIC_GLYPH_FONT_SIZE_PX,
+    x: originX,
+    y: originY,
+  });
+  knockout.textContent = glyph.character;
+
+  group.append(defs, knockout);
+}
+
+function appendNoteheadBackground(
+  group: SVGGElement,
+  glyph: RenderNoteheadGlyph,
+  originX: number,
+  originY: number,
+): void {
+  const background = NOTEHEAD_BACKGROUNDS[glyph.name];
+  const path = createSvgElement("path");
+  const glyphScale = MUSIC_GLYPH_FONT_SIZE_PX / 1000;
+
+  setAttributes(path, {
+    d: background.pathData,
+    fill: "#ffffff",
+    transform: `translate(${originX} ${originY}) scale(${glyphScale} ${glyphScale})`,
+  });
+
+  group.append(path);
+}
+
+function getSpanBounds(
+  maxPitch: number,
+  span: ProjectedSpan,
+): {
+  bottom: number;
+  top: number;
+} {
+  return {
+    bottom: getYForPitch(maxPitch, span.start) - SPAN_EVENT_CLEARANCE_PX,
+    top: getYForPitch(maxPitch, span.end) + SPAN_EVENT_CLEARANCE_PX,
+  };
+}
+
+function getOwningSpan(
+  renderSegmentLayout: RenderSegmentLayout,
+  pitch: number,
+): ProjectedSpan | undefined {
+  const containingSpans =
+    renderSegmentLayout.segment.placement.field.spans.filter(
+      (span) => span.start <= pitch && pitch <= span.end,
+    );
+
+  return containingSpans.sort(
+    (left, right) =>
+      left.end - left.start - (right.end - right.start) ||
+      left.start - right.start,
+  )[0];
+}
+
+function appendOverflowKnockout(
+  group: SVGGElement,
+  bounds: NoteheadBounds,
+  glyph: RenderNoteheadGlyph,
+  maxPitch: number,
+  suppressBottom: boolean,
+  suppressTop: boolean,
+  originX: number,
+  originY: number,
+  owningSpan: ProjectedSpan | undefined,
+): void {
+  if (owningSpan === undefined) {
+    return;
+  }
+
+  const spanBounds = getSpanBounds(maxPitch, owningSpan);
+  const noteheadMidY = (bounds.top + bounds.bottom) / 2;
+
+  if (!suppressTop && bounds.top < spanBounds.top) {
+    appendNoteheadKnockout(
+      group,
+      bounds,
+      noteheadMidY - bounds.top + NOTEHEAD_KNOCKOUT_STROKE_PX,
+      bounds.top - NOTEHEAD_KNOCKOUT_STROKE_PX,
+      glyph,
+      originX,
+      originY,
+    );
+  }
+
+  if (!suppressBottom && bounds.bottom > spanBounds.bottom) {
+    appendNoteheadKnockout(
+      group,
+      bounds,
+      bounds.bottom - noteheadMidY + NOTEHEAD_KNOCKOUT_STROKE_PX,
+      noteheadMidY,
+      glyph,
+      originX,
+      originY,
+    );
+  }
 }
 
 function appendStem(group: SVGGElement, stemGeometry: UpStemGeometry): void {
@@ -353,11 +536,14 @@ function shapePitchedEvent(
 }
 
 function appendPitchedEvent(
-  group: SVGGElement,
+  knockoutGroup: SVGGElement,
+  fillGroup: SVGGElement,
+  inkGroup: SVGGElement,
   centerX: number,
   duration: number,
   maxPitch: number,
   pitches: number[],
+  renderSegmentLayout: RenderSegmentLayout,
 ): RenderedPitchedEvent | undefined {
   const shapedEvent = shapePitchedEvent(duration, pitches);
 
@@ -373,12 +559,50 @@ function appendPitchedEvent(
     | undefined;
 
   shapedEvent.noteheads.forEach((notehead) => {
-    const noteheadOrigin = appendNote(
-      group,
+    const suppressBottom = shapedEvent.noteheads.some(
+      (candidate) =>
+        candidate.pitch < notehead.pitch &&
+        notehead.pitch - candidate.pitch <= 3,
+    );
+    const suppressTop = shapedEvent.noteheads.some(
+      (candidate) =>
+        candidate.pitch > notehead.pitch &&
+        candidate.pitch - notehead.pitch <= 3,
+    );
+    const noteheadOrigin = getNoteheadOrigin(
       centerX + staffSpacesToPx(notehead.centerOffsetStaffSpaces),
       maxPitch,
       notehead.pitch,
       shapedEvent.noteheadGlyph,
+    );
+    const noteheadBounds = getNoteheadBounds(
+      shapedEvent.noteheadGlyph,
+      noteheadOrigin.originX,
+      noteheadOrigin.originY,
+    );
+
+    appendNoteheadBackground(
+      fillGroup,
+      shapedEvent.noteheadGlyph,
+      noteheadOrigin.originX,
+      noteheadOrigin.originY,
+    );
+    appendOverflowKnockout(
+      knockoutGroup,
+      noteheadBounds,
+      shapedEvent.noteheadGlyph,
+      maxPitch,
+      suppressBottom,
+      suppressTop,
+      noteheadOrigin.originX,
+      noteheadOrigin.originY,
+      getOwningSpan(renderSegmentLayout, notehead.pitch),
+    );
+    appendNote(
+      inkGroup,
+      shapedEvent.noteheadGlyph,
+      noteheadOrigin.originX,
+      noteheadOrigin.originY,
     );
 
     if (notehead === shapedEvent.stemBaseNotehead) {
@@ -424,7 +648,9 @@ function appendStandaloneStemAndFlag(
 }
 
 export function appendProjectedSegmentEvents(
-  group: SVGGElement,
+  knockoutGroup: SVGGElement,
+  fillGroup: SVGGElement,
+  inkGroup: SVGGElement,
   maxPitch: number,
   renderSegmentLayout: RenderSegmentLayout,
 ): void {
@@ -445,11 +671,14 @@ export function appendProjectedSegmentEvents(
     switch (projectedEvent.type) {
       case "pitched": {
         const renderedPitchedEvent = appendPitchedEvent(
-          group,
+          knockoutGroup,
+          fillGroup,
+          inkGroup,
           centerX,
           projectedEvent.duration,
           maxPitch,
           projectedEvent.pitches,
+          renderSegmentLayout,
         );
 
         if (renderedPitchedEvent !== undefined) {
@@ -460,7 +689,7 @@ export function appendProjectedSegmentEvents(
       }
       case "rest":
         appendRest(
-          group,
+          inkGroup,
           centerX,
           maxPitch,
           projectedEvent.pitch,
@@ -471,7 +700,7 @@ export function appendProjectedSegmentEvents(
 
   beamGroups.forEach((beamGroup) => {
     appendBeamGroup(
-      group,
+      inkGroup,
       beamGroup.beamCounts,
       beamGroup.eventIndices
         .map((eventIndex) => renderedPitchedEventsByIndex.get(eventIndex))
@@ -494,7 +723,7 @@ export function appendProjectedSegmentEvents(
 
   renderedPitchedEventsByIndex.forEach((renderedPitchedEvent) => {
     if (!renderedPitchedEvent.isBeamed) {
-      appendStandaloneStemAndFlag(group, renderedPitchedEvent);
+      appendStandaloneStemAndFlag(inkGroup, renderedPitchedEvent);
     }
   });
 }
