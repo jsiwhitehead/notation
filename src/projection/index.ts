@@ -1,8 +1,10 @@
 import type {
+  EventLayer,
   Grounding,
   HarmonicRegion,
   HarmonicStructure,
   PieceInput,
+  TimeSignature,
 } from "../model";
 import { getEventPitches } from "../pitch";
 import { buildProjectionEvents, type ProjectionEvent } from "./events";
@@ -40,6 +42,7 @@ export type ProjectionSegment = {
   events: ProjectionEvent[];
   placement: ProjectionPlacement;
   segmentWidthUnits: number;
+  timeSignature: TimeSignature | undefined;
   timePositions: ProjectionTimePosition[];
   totalDuration: number;
 };
@@ -56,8 +59,11 @@ export function buildProjection(
   harmonicStructure: HarmonicStructure,
 ): Projection {
   const visibleWindow = getPaddedPieceWindow(getPitchWindow(input));
+  const restAnchorPitchBySegmentAndLayer =
+    getRestAnchorPitchBySegmentAndLayer(input);
   const projectedPlacements = buildProjectedPlacements(
     harmonicStructure,
+    restAnchorPitchBySegmentAndLayer,
     visibleWindow,
   );
   const segments: ProjectionSegment[] = input.segments.map((segment, index) => {
@@ -65,7 +71,7 @@ export function buildProjection(
     const placement = projectedPlacements[index]!;
     const projectedEvents = buildProjectionEvents(
       segment,
-      placement.restAnchorPitch,
+      restAnchorPitchBySegmentAndLayer[index]!,
     );
 
     return {
@@ -78,6 +84,7 @@ export function buildProjection(
       index,
       placement,
       segmentWidthUnits: projectedEvents.segmentWidthUnits,
+      timeSignature: segment.timeSignature,
       timePositions: projectedEvents.timePositions,
       totalDuration: projectedEvents.totalDuration,
     };
@@ -92,6 +99,7 @@ export function buildProjection(
 
 function buildProjectedPlacements(
   harmonicStructure: HarmonicStructure,
+  restAnchorPitchBySegmentAndLayer: Map<EventLayer, number>[],
   visibleWindow: PitchWindow,
 ): ProjectionPlacement[] {
   const projectedCenters = buildLinkedProjectedRegions(
@@ -112,10 +120,121 @@ function buildProjectedPlacements(
     center: projectedCenters[index]!,
     field: projectedFields[index]!,
     projectedGroundingOverlay: projectedGroundingOverlays[index],
-    restAnchorPitch: Math.round(
-      (visibleWindow.maxPitch + visibleWindow.minPitch) / 2,
-    ),
+    restAnchorPitch: restAnchorPitchBySegmentAndLayer[index]!.get(0)!,
   }));
+}
+
+function getMedianPitch(pitches: number[]): number {
+  const sortedPitches = [...pitches].sort((left, right) => left - right);
+  const middleIndex = Math.floor(sortedPitches.length / 2);
+
+  if (sortedPitches.length % 2 === 1) {
+    return sortedPitches[middleIndex]!;
+  }
+
+  return Math.round(
+    (sortedPitches[middleIndex - 1]! + sortedPitches[middleIndex]!) / 2,
+  );
+}
+
+function getRestAnchorPitchBySegmentAndLayer(
+  input: PieceInput,
+): Map<EventLayer, number>[] {
+  const pitchesBySegmentAndLayer = input.segments.map((segment) => {
+    const pitchesByLayer = new Map<EventLayer, number[]>();
+
+    segment.events.forEach((event) => {
+      const pitches = getEventPitches(event);
+
+      if (pitches.length === 0) {
+        return;
+      }
+
+      const layer = event.layer ?? 0;
+      const existingPitches = pitchesByLayer.get(layer) ?? [];
+
+      existingPitches.push(...pitches);
+      pitchesByLayer.set(layer, existingPitches);
+    });
+
+    return pitchesByLayer;
+  });
+  const restAnchorPitchBySegmentAndLayer: Map<EventLayer, number>[] = [];
+
+  pitchesBySegmentAndLayer.forEach((_, segmentIndex) => {
+    const restAnchorPitchByLayer = new Map<EventLayer, number>();
+    const layers = new Set<EventLayer>(
+      pitchesBySegmentAndLayer.flatMap((pitchesByLayer) => [
+        ...pitchesByLayer.keys(),
+      ]),
+    );
+
+    layers.forEach((layer) => {
+      const weightedPitches = [
+        ...getLayerPitches(pitchesBySegmentAndLayer[segmentIndex - 1], layer),
+        ...getLayerPitches(pitchesBySegmentAndLayer[segmentIndex], layer),
+        ...getLayerPitches(pitchesBySegmentAndLayer[segmentIndex], layer),
+        ...getLayerPitches(pitchesBySegmentAndLayer[segmentIndex + 1], layer),
+      ];
+
+      if (weightedPitches.length > 0) {
+        restAnchorPitchByLayer.set(layer, getMedianPitch(weightedPitches));
+        return;
+      }
+
+      restAnchorPitchByLayer.set(
+        layer,
+        getNearestLayerAnchorPitch(
+          pitchesBySegmentAndLayer,
+          segmentIndex,
+          layer,
+        ),
+      );
+    });
+
+    restAnchorPitchBySegmentAndLayer.push(restAnchorPitchByLayer);
+  });
+
+  return restAnchorPitchBySegmentAndLayer;
+}
+
+function getLayerPitches(
+  pitchesByLayer: Map<EventLayer, number[]> | undefined,
+  layer: EventLayer,
+): number[] {
+  return pitchesByLayer?.get(layer) ?? [];
+}
+
+function getNearestLayerAnchorPitch(
+  pitchesBySegmentAndLayer: Map<EventLayer, number[]>[],
+  segmentIndex: number,
+  layer: EventLayer,
+): number {
+  for (
+    let distance = 1;
+    distance < pitchesBySegmentAndLayer.length;
+    distance += 1
+  ) {
+    const previousPitches = getLayerPitches(
+      pitchesBySegmentAndLayer[segmentIndex - distance],
+      layer,
+    );
+
+    if (previousPitches.length > 0) {
+      return getMedianPitch(previousPitches);
+    }
+
+    const nextPitches = getLayerPitches(
+      pitchesBySegmentAndLayer[segmentIndex + distance],
+      layer,
+    );
+
+    if (nextPitches.length > 0) {
+      return getMedianPitch(nextPitches);
+    }
+  }
+
+  throw new Error(`Missing pitches for layer ${layer}.`);
 }
 
 function getPitchWindow(input: PieceInput): PitchWindow {

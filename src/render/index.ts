@@ -12,6 +12,15 @@ import {
 import { appendProjectedSegmentRegions } from "./regions";
 import { createSvgElement, setAttributes } from "./svg";
 
+const MAX_SYSTEM_WIDTH_PX = 1400;
+const SYSTEM_GAP_PX = 56;
+
+type RenderSystemLayout = {
+  segmentLayouts: RenderSegmentLayout[];
+  width: number;
+  y: number;
+};
+
 function appendSegmentForeground(
   knockoutGroup: SVGGElement,
   fillGroup: SVGGElement,
@@ -71,38 +80,67 @@ function appendAllSegmentSeams(
   });
 }
 
+function getSystemHeight(projection: Projection): number {
+  return (
+    VERTICAL_PADDING_PX * 2 +
+    (projection.maxPitch - projection.minPitch) * PITCH_STEP_HEIGHT_PX
+  );
+}
+
 function getNotationLayout(
   projection: Projection,
-  renderSegmentLayouts: RenderSegmentLayout[],
+  renderSystemLayouts: RenderSystemLayout[],
 ): NotationLayout {
-  const totalSegmentWidth = renderSegmentLayouts.reduce(
-    (sum, renderSegmentLayout) => sum + renderSegmentLayout.widthPx,
+  const systemHeight = getSystemHeight(projection);
+  const maxSystemWidth = renderSystemLayouts.reduce(
+    (maxWidth, renderSystemLayout) =>
+      Math.max(maxWidth, renderSystemLayout.width),
     0,
   );
 
   return {
     height:
-      VERTICAL_PADDING_PX * 2 +
-      (projection.maxPitch - projection.minPitch) * PITCH_STEP_HEIGHT_PX,
+      systemHeight * renderSystemLayouts.length +
+      Math.max(renderSystemLayouts.length - 1, 0) * SYSTEM_GAP_PX,
     maxPitch: projection.maxPitch,
     minPitch: projection.minPitch,
-    width:
-      HORIZONTAL_PADDING_PX * 2 +
-      totalSegmentWidth +
-      Math.max(renderSegmentLayouts.length - 1, 0) * SEGMENT_GAP_PX,
+    width: maxSystemWidth,
   };
 }
 
-function getRenderSegmentLayouts(
-  projection: Projection,
-): RenderSegmentLayout[] {
-  const renderSegmentLayouts: RenderSegmentLayout[] = [];
+function getRenderSystemLayouts(projection: Projection): RenderSystemLayout[] {
+  const renderSystemLayouts: RenderSystemLayout[] = [];
+  const systemHeight = getSystemHeight(projection);
+  let currentSystemSegmentLayouts: RenderSegmentLayout[] = [];
   let currentX = HORIZONTAL_PADDING_PX;
+  let currentY = 0;
 
   projection.segments.forEach((segment) => {
     const widthPx = getSegmentWidthPx(segment.segmentWidthUnits);
+    const hasSegmentsInSystem = currentSystemSegmentLayouts.length > 0;
+    const nextRightEdge =
+      currentX +
+      widthPx +
+      (hasSegmentsInSystem ? SEGMENT_GAP_PX / 2 : SEGMENT_GAP_PX / 2);
 
-    renderSegmentLayouts.push({
+    if (
+      hasSegmentsInSystem &&
+      nextRightEdge + HORIZONTAL_PADDING_PX > MAX_SYSTEM_WIDTH_PX
+    ) {
+      renderSystemLayouts.push({
+        segmentLayouts: currentSystemSegmentLayouts,
+        width:
+          currentSystemSegmentLayouts.at(-1)!.x +
+          currentSystemSegmentLayouts.at(-1)!.widthPx +
+          HORIZONTAL_PADDING_PX,
+        y: currentY,
+      });
+      currentSystemSegmentLayouts = [];
+      currentX = HORIZONTAL_PADDING_PX;
+      currentY += systemHeight + SYSTEM_GAP_PX;
+    }
+
+    currentSystemSegmentLayouts.push({
       segment,
       widthPx,
       x: currentX,
@@ -110,7 +148,18 @@ function getRenderSegmentLayouts(
     currentX += widthPx + SEGMENT_GAP_PX;
   });
 
-  return renderSegmentLayouts;
+  if (currentSystemSegmentLayouts.length > 0) {
+    renderSystemLayouts.push({
+      segmentLayouts: currentSystemSegmentLayouts,
+      width:
+        currentSystemSegmentLayouts.at(-1)!.x +
+        currentSystemSegmentLayouts.at(-1)!.widthPx +
+        HORIZONTAL_PADDING_PX,
+      y: currentY,
+    });
+  }
+
+  return renderSystemLayouts;
 }
 
 function getSeamXs(renderSegmentLayouts: RenderSegmentLayout[]): number[] {
@@ -131,13 +180,8 @@ function getSeamXs(renderSegmentLayouts: RenderSegmentLayout[]): number[] {
 
 function createNotationSvg(projection: Projection): SVGSVGElement {
   const svg = createSvgElement("svg");
-  const regionGroup = createSvgElement("g");
-  const seamGroup = createSvgElement("g");
-  const knockoutGroup = createSvgElement("g");
-  const fillGroup = createSvgElement("g");
-  const foregroundGroup = createSvgElement("g");
-  const renderSegmentLayouts = getRenderSegmentLayouts(projection);
-  const layout = getNotationLayout(projection, renderSegmentLayouts);
+  const renderSystemLayouts = getRenderSystemLayouts(projection);
+  const layout = getNotationLayout(projection, renderSystemLayouts);
 
   svg.setAttribute("viewBox", `0 0 ${layout.width} ${layout.height}`);
   svg.setAttribute("width", String(layout.width));
@@ -145,25 +189,46 @@ function createNotationSvg(projection: Projection): SVGSVGElement {
   svg.setAttribute("role", "img");
   svg.setAttribute("aria-label", "Simple harmonic notation view");
 
-  renderSegmentLayouts.forEach((renderSegmentLayout) => {
-    const group = createSvgElement("g");
-    appendProjectedSegmentRegions(group, layout, renderSegmentLayout);
-    regionGroup.append(group);
-  });
+  renderSystemLayouts.forEach((renderSystemLayout) => {
+    const systemGroup = createSvgElement("g");
+    const regionGroup = createSvgElement("g");
+    const seamGroup = createSvgElement("g");
+    const knockoutGroup = createSvgElement("g");
+    const fillGroup = createSvgElement("g");
+    const foregroundGroup = createSvgElement("g");
 
-  appendAllSegmentSeams(seamGroup, layout, renderSegmentLayouts);
+    systemGroup.setAttribute(
+      "transform",
+      `translate(0 ${renderSystemLayout.y})`,
+    );
 
-  renderSegmentLayouts.forEach((renderSegmentLayout) => {
-    appendSegmentForeground(
+    renderSystemLayout.segmentLayouts.forEach((renderSegmentLayout) => {
+      const group = createSvgElement("g");
+      appendProjectedSegmentRegions(group, layout, renderSegmentLayout);
+      regionGroup.append(group);
+    });
+
+    appendAllSegmentSeams(seamGroup, layout, renderSystemLayout.segmentLayouts);
+
+    renderSystemLayout.segmentLayouts.forEach((renderSegmentLayout) => {
+      appendSegmentForeground(
+        knockoutGroup,
+        fillGroup,
+        foregroundGroup,
+        layout,
+        renderSegmentLayout,
+      );
+    });
+
+    systemGroup.append(
+      regionGroup,
+      seamGroup,
       knockoutGroup,
       fillGroup,
       foregroundGroup,
-      layout,
-      renderSegmentLayout,
     );
+    svg.append(systemGroup);
   });
-
-  svg.append(regionGroup, seamGroup, knockoutGroup, fillGroup, foregroundGroup);
 
   return svg;
 }

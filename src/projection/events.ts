@@ -25,7 +25,7 @@ export type ProjectionEvent =
 
 export function buildProjectionEvents(
   segment: PieceInput["segments"][number],
-  middlePitch: number,
+  restAnchorPitchByLayer: Map<EventLayer, number>,
 ): {
   events: ProjectionEvent[];
   segmentWidthUnits: number;
@@ -66,7 +66,7 @@ export function buildProjectionEvents(
           duration: event.duration,
           layer,
           offset,
-          pitch: middlePitch,
+          pitch: restAnchorPitchByLayer.get(layer)!,
           type: "rest" as const,
         };
     }

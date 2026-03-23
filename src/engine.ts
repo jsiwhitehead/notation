@@ -22,6 +22,7 @@ const FIELD_CONTINUITY_OVERLAP = 3;
 const MAX_GAP_FILL_SIZE = 3;
 
 type SegmentEvidence = {
+  eventPitchClasses: PitchClass[];
   chordGroundPitchClass?: PitchClass;
   chordRootPitchClass?: PitchClass;
   localPitchClasses: PitchClass[];
@@ -46,12 +47,14 @@ function collectSegmentEvidence(segment: SegmentInput): SegmentEvidence {
     segment.events.flatMap(getEventPitchClasses),
   );
   const chordPitchClasses = normalizedChordSymbol?.pitchClasses ?? [];
+  const localPitchClasses = uniqueSortedPitchClasses([
+    ...eventPitchClasses,
+    ...chordPitchClasses,
+  ]);
 
   return {
-    localPitchClasses: uniqueSortedPitchClasses([
-      ...eventPitchClasses,
-      ...chordPitchClasses,
-    ]),
+    eventPitchClasses,
+    localPitchClasses,
     ...(normalizedChordSymbol === undefined
       ? {}
       : {
@@ -70,13 +73,21 @@ function getFilledFifthsRegion(evidence: PitchClass[]): PitchClass[] {
 }
 
 function buildCenter(segmentEvidence: SegmentEvidence): HarmonicRegion {
-  const pitchClasses = getFilledFifthsRegion(segmentEvidence.localPitchClasses);
+  const directPitchClasses = segmentEvidence.localPitchClasses;
+  const filledPitchClasses = getFilledFifthsRegion(directPitchClasses);
 
-  if (hasAdjacentSemitonePairs(pitchClasses)) {
+  if (hasAdjacentSemitonePairs(filledPitchClasses)) {
+    if (
+      segmentEvidence.eventPitchClasses.length > 0 &&
+      !hasAdjacentSemitonePairs(directPitchClasses)
+    ) {
+      return buildRegion(directPitchClasses);
+    }
+
     return buildRegion([]);
   }
 
-  return buildRegion(pitchClasses);
+  return buildRegion(filledPitchClasses);
 }
 
 function getGrounding(

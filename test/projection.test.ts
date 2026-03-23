@@ -4,6 +4,21 @@ import { runEngine } from "../src/engine";
 import { buildProjection } from "../src/projection";
 import { SEED_INPUT } from "../src/seed-input";
 
+const BAR_NINE_INFLECTION_PITCHES = [
+  53, 57, 62, 64, 65, 67, 69, 71, 73, 74, 76, 77, 79,
+];
+const C_SHARP_DIATONIC_INFLECTION_PITCHES = [61, 62, 64, 65, 67, 69, 71, 73];
+
+function buildSingleSegmentNoteInput(pitches: number[]) {
+  return {
+    segments: [
+      {
+        events: pitches.map((pitch) => ({ duration: 1, pitch, type: "note" as const })),
+      },
+    ],
+  };
+}
+
 describe("projection", () => {
   test("buildProjection groups contiguous tone-runs into projected spans", () => {
     const projection = buildProjection(
@@ -65,6 +80,38 @@ describe("projection", () => {
       { end: 72, start: 72 },
       { end: 73, start: 73 },
     ]);
+  });
+
+  test("buildProjection keeps spans for an event-driven chromatic inflection instead of dropping the region", () => {
+    const input = buildSingleSegmentNoteInput(BAR_NINE_INFLECTION_PITCHES);
+    const harmonicStructure = runEngine(input);
+    const projection = buildProjection(input, harmonicStructure);
+
+    expect(projection.segments[0]?.placement.center.spans).toEqual([
+      { end: 52, start: 50 },
+      { end: 61, start: 53 },
+      { end: 64, start: 62 },
+      { end: 73, start: 65 },
+      { end: 76, start: 74 },
+      { end: 85, start: 77 },
+    ]);
+  });
+
+  test("buildProjection renders a single-bar C-sharp diatonic inflection as D-E and F-C-sharp spans", () => {
+    const input = buildSingleSegmentNoteInput(C_SHARP_DIATONIC_INFLECTION_PITCHES);
+    const harmonicStructure = runEngine(input);
+    const projection = buildProjection(input, harmonicStructure);
+
+    expect(projection.segments[0]?.placement.center.spans).toEqual(
+      expect.arrayContaining([
+        { end: 64, start: 62 },
+        { end: 73, start: 65 },
+      ]),
+    );
+    expect(projection.segments[0]?.placement.center.spans).not.toContainEqual({
+      end: 71,
+      start: 65,
+    });
   });
 
   test("buildProjection repeats region spans across the visible pitch window", () => {
@@ -271,6 +318,82 @@ describe("projection", () => {
     });
     expect(projection.segments[1]?.events).toEqual([
       { duration: 2, layer: 0, offset: 0, pitch: 72, type: "rest", x: 0.5 },
+    ]);
+  });
+
+  test("buildProjection anchors rests separately for each layer", () => {
+    const projection = buildProjection(
+      {
+        segments: [
+          {
+            events: [
+              { duration: 1, layer: 0, pitch: 76, type: "note" },
+              { duration: 1, layer: 1, pitch: 52, type: "note" },
+            ],
+          },
+          {
+            events: [
+              { duration: 1, layer: 0, type: "rest" },
+              { duration: 1, layer: 1, type: "rest" },
+            ],
+          },
+        ],
+      },
+      {
+        segments: [
+          {
+            center: { pitchClasses: [4] },
+            field: { pitchClasses: [4] },
+          },
+          {
+            center: { pitchClasses: [] },
+            field: { pitchClasses: [] },
+          },
+        ],
+      },
+    );
+
+    expect(projection.segments[1]?.events).toEqual([
+      { duration: 1, layer: 0, offset: 0, pitch: 76, type: "rest", x: 0.5 },
+      { duration: 1, layer: 1, offset: 0, pitch: 52, type: "rest", x: 0.5 },
+    ]);
+  });
+
+  test("buildProjection uses a local weighted window for layer rest anchors", () => {
+    const projection = buildProjection(
+      {
+        segments: [
+          {
+            events: [{ duration: 1, layer: 0, pitch: 60, type: "note" }],
+          },
+          {
+            events: [{ duration: 1, layer: 0, type: "rest" }],
+          },
+          {
+            events: [{ duration: 1, layer: 0, pitch: 72, type: "note" }],
+          },
+        ],
+      },
+      {
+        segments: [
+          {
+            center: { pitchClasses: [0] },
+            field: { pitchClasses: [0] },
+          },
+          {
+            center: { pitchClasses: [] },
+            field: { pitchClasses: [] },
+          },
+          {
+            center: { pitchClasses: [0] },
+            field: { pitchClasses: [0] },
+          },
+        ],
+      },
+    );
+
+    expect(projection.segments[1]?.events).toEqual([
+      { duration: 1, layer: 0, offset: 0, pitch: 66, type: "rest", x: 0.5 },
     ]);
   });
 

@@ -25,9 +25,15 @@ export type ChordEvent = BaseEvent & {
 
 export type EventInput = ChordEvent | NoteEvent | RestEvent;
 
+export type TimeSignature = {
+  beatType: number;
+  beats: number;
+};
+
 export type SegmentInput = {
   chordSymbol?: ChordSymbol;
   events: EventInput[];
+  timeSignature?: TimeSignature;
 };
 
 export type PieceInput = {

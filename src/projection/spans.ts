@@ -13,8 +13,8 @@ export type PitchWindow = {
 };
 
 type RegionSpanClass = {
-  end: PitchClass;
-  start: PitchClass;
+  end: number;
+  start: number;
 };
 
 export type Span = {
@@ -68,6 +68,14 @@ function buildRegionSpanClasses(region: HarmonicRegion): RegionSpanClass[] {
 
     spans.push({ end: pitchClass, start: pitchClass });
   });
+
+  if (
+    spans.length > 1 &&
+    sortedPitchClasses[0]! + 12 - spans[spans.length - 1]!.end === 2
+  ) {
+    spans[spans.length - 1]!.end = spans[0]!.end + 12;
+    spans.shift();
+  }
 
   return spans;
 }

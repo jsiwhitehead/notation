@@ -401,9 +401,7 @@ function appendCenterSpanNotches(
   });
 }
 
-function getCenterSpanNotchSets(
-  spans: ProjectedSpan[],
-): CenterSpanNotchSets {
+function getCenterSpanNotchSets(spans: ProjectedSpan[]): CenterSpanNotchSets {
   return {
     spanEnds: new Set(spans.map((span) => span.end)),
     spanStarts: new Set(spans.map((span) => span.start)),
@@ -476,9 +474,7 @@ function getSpanNotchGeometry(
     CENTER_SPAN_NOTCH_HEIGHT_EXTENSION_PX;
   const apexX =
     centerX - adjacentSpanDirection * CENTER_SPAN_NOTCH_APEX_X_OFFSET_PX;
-  const baseY =
-    spanEdgeY +
-    adjacentSpanDirection * adjacentSpanBaseOffset;
+  const baseY = spanEdgeY + adjacentSpanDirection * adjacentSpanBaseOffset;
 
   return {
     apexX,
@@ -548,10 +544,7 @@ export function appendProjectedSegmentRegions(
       span,
       centerPaint,
     );
-    const notchEdges = getCenterSpanNotchEdges(
-      notchSets,
-      span,
-    );
+    const notchEdges = getCenterSpanNotchEdges(notchSets, span);
     appendCenterSpanNotches(
       notchGroup,
       layout.maxPitch,

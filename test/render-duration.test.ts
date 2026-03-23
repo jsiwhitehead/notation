@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
-import { getShortDurationBeamCount } from "../src/render/duration";
+import {
+  getDurationDotCount,
+  getShortDurationBeamCount,
+} from "../src/render/duration";
 
 describe("render duration policy", () => {
   test("maps supported short durations to beam counts", () => {
@@ -15,5 +18,18 @@ describe("render duration policy", () => {
     expect(getShortDurationBeamCount(2)).toBe(0);
     expect(getShortDurationBeamCount(1)).toBe(0);
     expect(getShortDurationBeamCount(0.75)).toBe(0);
+  });
+
+  test("counts supported duration dots", () => {
+    expect(getDurationDotCount(3)).toBe(1);
+    expect(getDurationDotCount(1.5)).toBe(1);
+    expect(getDurationDotCount(0.75)).toBe(1);
+    expect(getDurationDotCount(0.375)).toBe(1);
+    expect(getDurationDotCount(3.5)).toBe(2);
+    expect(getDurationDotCount(1.75)).toBe(2);
+    expect(getDurationDotCount(3.75)).toBe(3);
+    expect(getDurationDotCount(1.875)).toBe(3);
+    expect(getDurationDotCount(1)).toBe(0);
+    expect(getDurationDotCount(0.25)).toBe(0);
   });
 });

@@ -10,6 +10,7 @@ In the current code, the harmonic engine consumes a simple canonical input:
 - ordered `SegmentInput[]`
 - `EventInput[]` inside each segment
 - optional `chordSymbol` string on each segment
+- optional `timeSignature` on each segment
 
 `EventInput` currently covers:
 
@@ -24,6 +25,7 @@ The canonical input contains authored input only:
 - rests
 - durations
 - optional local timing and layer organization
+- optional segment-local meter declarations
 - optional chord-symbol strings interpreted as local harmonic evidence
 
 The canonical input does not contain harmonic structure. Harmonic structure is derived by the harmonic engine.

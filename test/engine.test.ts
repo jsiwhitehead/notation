@@ -215,6 +215,30 @@ describe("runEngine", () => {
       expect(segment.grounding).toBeUndefined();
     });
 
+    test("keeps event-driven chromatic inflection sparse when fifth filling would erase the span structure", () => {
+      const segment = getSingleSegment({
+        events: [
+          { duration: 1, pitch: 53, type: "note" },
+          { duration: 1, pitch: 57, type: "note" },
+          { duration: 1, pitch: 62, type: "note" },
+          { duration: 1, pitch: 64, type: "note" },
+          { duration: 1, pitch: 65, type: "note" },
+          { duration: 1, pitch: 67, type: "note" },
+          { duration: 1, pitch: 69, type: "note" },
+          { duration: 1, pitch: 71, type: "note" },
+          { duration: 1, pitch: 73, type: "note" },
+          { duration: 1, pitch: 74, type: "note" },
+          { duration: 1, pitch: 76, type: "note" },
+          { duration: 1, pitch: 77, type: "note" },
+          { duration: 1, pitch: 79, type: "note" },
+        ],
+      });
+
+      expectRegionPitchClasses(segment.center, [1, 2, 4, 5, 7, 9, 11]);
+      expectRegionPitchClasses(segment.field, [1, 2, 4, 5, 7, 9, 11]);
+      expect(segment.grounding).toEqual({ ground: 7, root: 7 });
+    });
+
     test("keeps an extension-bearing local center as one direct evidence set", () => {
       const segment = getSingleSegment({
         chordSymbol: "C13",
