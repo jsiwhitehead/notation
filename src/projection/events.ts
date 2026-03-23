@@ -1,4 +1,4 @@
-import type { EventOffset, PieceInput } from "../model";
+import type { EventLayer, EventOffset, PieceInput } from "../model";
 import {
   buildProjectionTimePositions,
   getSegmentWidthUnits,
@@ -8,6 +8,7 @@ import {
 export type ProjectionEvent =
   | {
       duration: number;
+      layer: EventLayer;
       offset: EventOffset;
       pitches: number[];
       type: "pitched";
@@ -15,6 +16,7 @@ export type ProjectionEvent =
     }
   | {
       duration: number;
+      layer: EventLayer;
       offset: EventOffset;
       pitch: number;
       type: "rest";
@@ -46,6 +48,7 @@ export function buildProjectionEvents(
       case "note":
         return {
           duration: event.duration,
+          layer,
           offset,
           pitches: [event.pitch],
           type: "pitched" as const,
@@ -53,6 +56,7 @@ export function buildProjectionEvents(
       case "chord":
         return {
           duration: event.duration,
+          layer,
           offset,
           pitches: event.pitches,
           type: "pitched" as const,
@@ -60,6 +64,7 @@ export function buildProjectionEvents(
       case "rest":
         return {
           duration: event.duration,
+          layer,
           offset,
           pitch: middlePitch,
           type: "rest" as const,

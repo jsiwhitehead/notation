@@ -1,4 +1,10 @@
-import type { ProjectionEvent } from "../projection";
+import {
+  appendBeamGroup,
+  buildBeamGroups,
+  type BeamStemGeometry,
+} from "./beams";
+import { getShortDurationBeamCount } from "./duration";
+import type { RenderSegmentLayout } from "./layout";
 import {
   getYForPitch,
   NOTEHEAD_HEIGHT_PX,
@@ -49,19 +55,19 @@ type ShapedPitchedEvent = {
   stemTipPitch: number | undefined;
 };
 
-type UpStemGeometry = {
-  anchorY: number;
-  centerX: number;
-  leftX: number;
-  tipY: number;
-};
+type UpStemGeometry = BeamStemGeometry;
 
 type DurationAppearance = {
-  flagGlyph: RenderGlyph | undefined;
   hasStem: boolean;
   noteheadGlyph: RenderNoteheadGlyph;
   restGlyph: RenderGlyph;
   threshold: number;
+};
+
+type RenderedPitchedEvent = {
+  flagGlyph: RenderGlyph | undefined;
+  isBeamed: boolean;
+  stemGeometry: UpStemGeometry | undefined;
 };
 
 function getRenderGlyph(name: GlyphName): RenderGlyph {
@@ -105,55 +111,46 @@ const FLAG_8TH_UP = getRenderGlyph("flag8thUp");
 const PX_PER_STAFF_SPACE =
   NOTEHEAD_HEIGHT_PX / NOTEHEAD_BLACK.heightStaffSpaces;
 const MUSIC_GLYPH_FONT_SIZE_PX = PX_PER_STAFF_SPACE * 4;
-const ENGRAVING_DEFAULTS = getEngravingDefaults();
-const STEM_THICKNESS_STAFF_SPACES = ENGRAVING_DEFAULTS.stemThickness;
+const STEM_THICKNESS_STAFF_SPACES = getEngravingDefaults().stemThickness;
 
-// Duration appearance policy for the current renderer.
 const DURATION_APPEARANCES: DurationAppearance[] = [
   {
-    flagGlyph: undefined,
     hasStem: false,
     noteheadGlyph: NOTEHEAD_WHOLE,
     restGlyph: REST_WHOLE,
     threshold: WHOLE_DURATION,
   },
   {
-    flagGlyph: undefined,
     hasStem: true,
     noteheadGlyph: NOTEHEAD_HALF,
     restGlyph: REST_HALF,
     threshold: HALF_DURATION,
   },
   {
-    flagGlyph: undefined,
     hasStem: true,
     noteheadGlyph: NOTEHEAD_BLACK,
     restGlyph: REST_QUARTER,
     threshold: QUARTER_DURATION,
   },
   {
-    flagGlyph: FLAG_8TH_UP,
     hasStem: true,
     noteheadGlyph: NOTEHEAD_BLACK,
     restGlyph: REST_8TH,
     threshold: 0.5,
   },
   {
-    flagGlyph: FLAG_16TH_UP,
     hasStem: true,
     noteheadGlyph: NOTEHEAD_BLACK,
     restGlyph: REST_16TH,
     threshold: 0.25,
   },
   {
-    flagGlyph: FLAG_32ND_UP,
     hasStem: true,
     noteheadGlyph: NOTEHEAD_BLACK,
     restGlyph: REST_32ND,
     threshold: 0.125,
   },
   {
-    flagGlyph: FLAG_64TH_UP,
     hasStem: true,
     noteheadGlyph: NOTEHEAD_BLACK,
     restGlyph: REST_64TH,
@@ -175,6 +172,21 @@ function getDurationAppearance(duration: number): DurationAppearance {
       isDurationAtLeast(duration, appearance.threshold),
     ) ?? DURATION_APPEARANCES.at(-1)!
   );
+}
+
+function getFlagGlyph(duration: number): RenderGlyph | undefined {
+  switch (getShortDurationBeamCount(duration)) {
+    case 1:
+      return FLAG_8TH_UP;
+    case 2:
+      return FLAG_16TH_UP;
+    case 3:
+      return FLAG_32ND_UP;
+    case 4:
+      return FLAG_64TH_UP;
+    default:
+      return undefined;
+  }
 }
 
 function getNoteheadDisplacementStaffSpaces(
@@ -307,7 +319,7 @@ function shapePitchedEvent(
   const durationAppearance = getDurationAppearance(duration);
   const noteheadGlyph = durationAppearance.noteheadGlyph;
   const hasStem = durationAppearance.hasStem;
-  const flagGlyph = durationAppearance.flagGlyph;
+  const flagGlyph = getFlagGlyph(duration);
   const noteheadDisplacementStaffSpaces =
     getNoteheadDisplacementStaffSpaces(noteheadGlyph);
 
@@ -346,11 +358,11 @@ function appendPitchedEvent(
   duration: number,
   maxPitch: number,
   pitches: number[],
-): void {
+): RenderedPitchedEvent | undefined {
   const shapedEvent = shapePitchedEvent(duration, pitches);
 
   if (shapedEvent === undefined) {
-    return;
+    return undefined;
   }
 
   let stemOrigin:
@@ -374,56 +386,115 @@ function appendPitchedEvent(
     }
   });
 
-  if (
-    stemOrigin !== undefined &&
-    shapedEvent.stemTipPitch !== undefined &&
-    shapedEvent.hasStem
-  ) {
-    const stemGeometry = getUpStemGeometry(
-      shapedEvent.noteheadGlyph,
-      stemOrigin,
-      maxPitch,
-      shapedEvent.stemTipPitch,
+  return {
+    flagGlyph: shapedEvent.flagGlyph,
+    isBeamed: false,
+    stemGeometry:
+      stemOrigin !== undefined &&
+      shapedEvent.stemTipPitch !== undefined &&
+      shapedEvent.hasStem
+        ? getUpStemGeometry(
+            shapedEvent.noteheadGlyph,
+            stemOrigin,
+            maxPitch,
+            shapedEvent.stemTipPitch,
+          )
+        : undefined,
+  };
+}
+
+function appendStandaloneStemAndFlag(
+  group: SVGGElement,
+  renderedPitchedEvent: RenderedPitchedEvent,
+): void {
+  if (renderedPitchedEvent.stemGeometry === undefined) {
+    return;
+  }
+
+  appendStem(group, renderedPitchedEvent.stemGeometry);
+
+  if (renderedPitchedEvent.flagGlyph !== undefined) {
+    appendFlag(
+      group,
+      renderedPitchedEvent.flagGlyph,
+      renderedPitchedEvent.stemGeometry.leftX,
+      renderedPitchedEvent.stemGeometry.tipY,
     );
-
-    if (stemGeometry !== undefined) {
-      appendStem(group, stemGeometry);
-
-      if (shapedEvent.flagGlyph !== undefined) {
-        appendFlag(
-          group,
-          shapedEvent.flagGlyph,
-          stemGeometry.leftX,
-          stemGeometry.tipY,
-        );
-      }
-    }
   }
 }
 
-export function appendProjectedEvent(
+export function appendProjectedSegmentEvents(
   group: SVGGElement,
-  centerX: number,
   maxPitch: number,
-  projectedEvent: ProjectionEvent,
+  renderSegmentLayout: RenderSegmentLayout,
 ): void {
-  switch (projectedEvent.type) {
-    case "pitched":
-      appendPitchedEvent(
-        group,
-        centerX,
-        projectedEvent.duration,
-        maxPitch,
-        projectedEvent.pitches,
-      );
-      return;
-    case "rest":
-      appendRest(
-        group,
-        centerX,
-        maxPitch,
-        projectedEvent.pitch,
-        getDurationAppearance(projectedEvent.duration).restGlyph,
-      );
-  }
+  const beamGroups = buildBeamGroups(renderSegmentLayout.segment.events);
+  const beamedEventIndices = new Set<number>();
+  const renderedPitchedEventsByIndex = new Map<number, RenderedPitchedEvent>();
+
+  beamGroups.forEach((beamGroup) => {
+    beamGroup.eventIndices.forEach((eventIndex) => {
+      beamedEventIndices.add(eventIndex);
+    });
+  });
+
+  renderSegmentLayout.segment.events.forEach((projectedEvent, eventIndex) => {
+    const centerX =
+      renderSegmentLayout.x + projectedEvent.x * renderSegmentLayout.widthPx;
+
+    switch (projectedEvent.type) {
+      case "pitched": {
+        const renderedPitchedEvent = appendPitchedEvent(
+          group,
+          centerX,
+          projectedEvent.duration,
+          maxPitch,
+          projectedEvent.pitches,
+        );
+
+        if (renderedPitchedEvent !== undefined) {
+          renderedPitchedEvent.isBeamed = beamedEventIndices.has(eventIndex);
+          renderedPitchedEventsByIndex.set(eventIndex, renderedPitchedEvent);
+        }
+        return;
+      }
+      case "rest":
+        appendRest(
+          group,
+          centerX,
+          maxPitch,
+          projectedEvent.pitch,
+          getDurationAppearance(projectedEvent.duration).restGlyph,
+        );
+    }
+  });
+
+  beamGroups.forEach((beamGroup) => {
+    appendBeamGroup(
+      group,
+      beamGroup.beamCounts,
+      beamGroup.eventIndices
+        .map((eventIndex) => renderedPitchedEventsByIndex.get(eventIndex))
+        .filter(
+          (
+            renderedPitchedEvent,
+          ): renderedPitchedEvent is RenderedPitchedEvent =>
+            renderedPitchedEvent !== undefined,
+        )
+        .map((renderedPitchedEvent) => renderedPitchedEvent.stemGeometry)
+        .filter(
+          (stemGeometry): stemGeometry is UpStemGeometry =>
+            stemGeometry !== undefined,
+        ),
+      appendStem,
+      staffSpacesToPx,
+      STEM_THICKNESS_STAFF_SPACES,
+    );
+  });
+
+  renderedPitchedEventsByIndex.forEach((renderedPitchedEvent) => {
+    if (!renderedPitchedEvent.isBeamed) {
+      appendStandaloneStemAndFlag(group, renderedPitchedEvent);
+    }
+  });
 }

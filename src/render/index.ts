@@ -1,5 +1,5 @@
 import { type Projection } from "../projection";
-import { appendProjectedEvent } from "./events";
+import { appendProjectedSegmentEvents } from "./events";
 import type { NotationLayout, RenderSegmentLayout } from "./layout";
 import {
   getSegmentWidthPx,
@@ -18,13 +18,9 @@ function appendSegmentForeground(
   renderSegmentLayout: RenderSegmentLayout,
 ): void {
   const label = createSvgElement("text");
-  const { segment, widthPx, x } = renderSegmentLayout;
+  const { segment, x } = renderSegmentLayout;
 
-  segment.events.forEach((projectedEvent) => {
-    const centerX = x + projectedEvent.x * widthPx;
-
-    appendProjectedEvent(group, centerX, layout.maxPitch, projectedEvent);
-  });
+  appendProjectedSegmentEvents(group, layout.maxPitch, renderSegmentLayout);
 
   setAttributes(label, {
     fill: "#111111",

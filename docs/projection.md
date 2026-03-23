@@ -47,7 +47,7 @@ The carried harmonic structure remains analysis-native and currently contains:
 - projected `center` region span objects
 - optional projected grounding overlay data for projected `root` and `ground` marks
 
-Projected events currently also carry a segment-local x-position derived from projection-owned time-position spacing. Ordered `timePositions` expose the shared onset structure that spacing is built from, and `segmentWidthUnits` carries the segment-level width demand derived from that spacing in projection-local layout units.
+Projected events currently also carry their resolved `layer`, preserved offset and duration timing, and a segment-local x-position derived from projection-owned time-position spacing. Ordered `timePositions` expose the shared onset structure that spacing is built from, and `segmentWidthUnits` carries the segment-level width demand derived from that spacing in projection-local layout units.
 
 Each projected harmonic region currently contains:
 
@@ -80,7 +80,7 @@ In the current implementation, projection:
 
 1. derives a visible pitch range from events
 2. computes event offsets layer by layer when offsets are not explicitly authored
-3. preserves durations and simultaneities in the resulting events
+3. preserves durations, layer identity, and simultaneities in the resulting events
 4. derives ordered shared time positions from event offsets inside each segment
 5. computes simple segment-local x-positions for projected events from those shared time positions
 6. derives a simple segment width from time-position spacing demand

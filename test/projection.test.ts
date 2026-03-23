@@ -186,6 +186,7 @@ describe("projection", () => {
     expect(projection.segments[0]?.events).toEqual([
       {
         duration: 1,
+        layer: 0,
         offset: 0,
         pitches: [60, 64, 67],
         type: "pitched",
@@ -269,7 +270,7 @@ describe("projection", () => {
       },
     });
     expect(projection.segments[1]?.events).toEqual([
-      { duration: 2, offset: 0, pitch: 72, type: "rest", x: 0.5 },
+      { duration: 2, layer: 0, offset: 0, pitch: 72, type: "rest", x: 0.5 },
     ]);
   });
 
