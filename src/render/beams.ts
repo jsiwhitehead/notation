@@ -4,7 +4,7 @@ import { getShortDurationBeamCount, isDurationEqual } from "./duration";
 import { createSvgElement, setAttributes } from "./svg";
 import { getEngravingDefaults } from "./smufl";
 
-export type BeamGroup = {
+type BeamGroup = {
   beamCounts: number[];
   eventIndices: number[];
 };

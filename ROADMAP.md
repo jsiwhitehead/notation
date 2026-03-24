@@ -12,21 +12,21 @@ This document describes the main forward-looking work for the repository. It int
 - define how contract changes should be versioned and documented as the system grows
 - validate that architectural boundaries remain intact as the system grows
 
-## Harmonic engine
+## Harmony stage
 
 - strengthen field derivation beyond the current basic neighboring-center continuity
 - improve fallback grounding inference beyond the current simple center-based fallback
 - define and support implied harmonic support such as probable-fifth and other implied-tone logic
-- define the boundary between engine inference, projection behavior, and contextual analysis across segments
+- define the boundary between harmony-stage inference, projection behavior, and contextual analysis across segments
 - define when harmonic structure should be expressed in a shared piece-level orientation versus purely local orientation
 - define the contract between local harmonic structure and larger-scale key or scale context
-- strengthen separation of harmonic evidence kinds within engine inference
+- strengthen separation of harmonic evidence kinds within harmony-stage inference
 - support second-level chord-implied pitch classes separate from committed chord-symbol pitch classes
 - add guide-based or block-based harmonic-structure interpretations
 - support more musically convincing handling of augmented-like and diminished-like collections
 - define how to choose among musically equivalent local harmonic orientations
 - define how harmonic structure should represent confidence, ambiguity, or multiple viable readings
-- support multiple engine policies and richer harmonic-orientation descriptions on the same canonical input and harmonic structure
+- support multiple harmony-stage policies and richer harmonic-orientation descriptions on the same canonical input and harmonic structure
 
 ## Projection
 
@@ -74,10 +74,10 @@ This document describes the main forward-looking work for the repository. It int
 - collect representative fragments and longer continuous pieces that exercise the intended notation language
 - preserve successful examples in a maintained corpus
 - expand the current fixture set across representative musical cases
-- add side-by-side fixture comparisons across engine policies
+- add side-by-side fixture comparisons across harmony-stage policies
 - build side-by-side examples that compare authoring inputs, harmonic structures, projections, and rendered outputs
-- formalize success criteria for engine behavior, projection behavior, and rendering legibility
+- formalize success criteria for harmony-stage behavior, projection behavior, and rendering legibility
 - add confidence checks for ambiguous or weakly evidenced material
 - support visual regression snapshots for renderer work where useful
-- support comparative examples across multiple engine or renderer policies
+- support comparative examples across multiple harmony-stage or renderer policies
 - support benchmark examples for performance-sensitive paths if the project grows in scale

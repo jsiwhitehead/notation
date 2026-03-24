@@ -14,10 +14,11 @@ This stage consumes one input:
 
 The following aspects of rendering appear stable in this repository:
 
-- rendering remains distinct from both the harmonic engine and projection
+- rendering remains distinct from both the harmony stage and projection
 - rendering consumes one unified projection rather than separate musical diagrams
 - rendering is responsible for visual realization, not musical inference
 - rendering may vary widely in style while still showing the same projection
+- rendering SHOULD build intermediate graphic objects and positioned graphic objects before emitting output
 
 Rendering takes a completed projection and turns it into visible output. Unlike projection, it does not choose musical pitch-space placement.
 
@@ -30,7 +31,7 @@ Rendering is responsible for:
 - making duration, silence, and harmonic orientation legible
 - choosing a visible notation language without changing projection
 
-Rendering is the final stage. It is not the harmonic engine. It is not projection.
+Rendering is the final stage. It is not the harmony stage. It is not projection.
 
 ## Current implementation
 
@@ -40,15 +41,15 @@ The repository currently contains one renderer implementation, which emits a sim
 
 In the current implementation, rendering:
 
-1. establishes score geometry from the projection pitch range and segment count
-2. renders projected field spans as combined SVG path shapes, including any projection-resolved half-joins
-3. renders projected center material as combined SVG path shapes, including any projection-resolved half-joins
+1. establishes notation and system layout from the projection pitch range, segment count, and projected segment widths
+2. builds region graphics from projected harmonic slices, including spans, notches, and grounding marks
+3. positions those region graphics into SVG-ready geometry and then emits them as SVG paths and rects
 4. draws a simple white seam between adjacent segments as a renderer-level visual divider
-5. renders projection-resolved joins between adjacent field and center spans from the absolute neighboring span geometry carried on each projected span
-6. renders projected grounding as uniform short grounding blocks, even though projection still distinguishes `root` and `ground`
-7. derives harmonic hue from one shared 24-step fifth-color wheel with a matched dark companion palette
-8. uses projection-provided segment-local event x-positions and projected segment width units, and converts those width units into renderer px geometry
-9. shapes events from projected durations into duration-aware noteheads, rests, stems, simple chord displacement, and a first-pass sloped beaming step for time-contiguous short-note groups within one projected layer, including mixed eighth/sixteenth groups with simple single-sided secondary partial beams, stacked beams for uniform 16th/32nd/64th runs, and standalone up-flags elsewhere
-10. emits a simple SVG score view
+5. builds event graphics from projected events, including pitched-event notehead geometry, explicit projected field-span ownership bounds, and rest glyph selection
+6. positions those event graphics, then emits noteheads, rests, stems, flags, dots, and beam groups
+7. renders projection-resolved joins between adjacent field and center spans from the absolute neighboring span geometry carried on each projected span
+8. derives harmonic hue from one shared 24-step fifth-color wheel with a matched dark companion palette
+9. assembles each system through a focused render-system helper that owns paint-order group setup, region/event emission, and segment seams
+10. emits a simple SVG score view through `renderNotationSvg(...)`
 
-In the current implementation, octave-range repetition, whole-span expansion, join determination, grounding-mark placement, simple event x-position spacing, and segment width demand are projection responsibilities. Harmonic color, join geometry, and the segment seam are renderer-level styling derived from projected pitch and region content. The renderer consumes those pitch-space decisions and focuses on screen geometry and visual legibility.
+In the current implementation, octave-range repetition, whole-span expansion, join determination, grounding-mark placement, harmonic-slice timing, explicit note-to-field-span ownership, simple event x-position spacing, and segment width demand are projection responsibilities. Harmonic color, join geometry, and the segment seam are renderer-level styling derived from projected pitch and region content. The renderer consumes those pitch-space decisions and focuses on screen geometry and visual legibility.

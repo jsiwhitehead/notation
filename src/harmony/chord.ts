@@ -1,5 +1,5 @@
-import type { PitchClass } from "./model";
-import { toPitchClass, uniqueSortedPitchClasses } from "./pitch";
+import type { PitchClass } from "../model";
+import { toPitchClass, uniqueSortedPitchClasses } from "../pitch";
 
 type ParsedChordSymbol = {
   groundPitchClass: PitchClass;

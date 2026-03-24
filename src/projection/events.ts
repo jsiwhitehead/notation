@@ -1,15 +1,27 @@
 import type { EventLayer, EventOffset, PieceInput } from "../model";
+import { getSegmentTotalDuration } from "../segment";
 import {
   buildProjectionTimePositions,
   getSegmentWidthUnits,
   type ProjectionTimePosition,
 } from "./spacing";
 
+export type ProjectedOwnedSpan = {
+  end: number;
+  start: number;
+};
+
+export type ProjectedPitchOwnership = {
+  fieldSpan?: ProjectedOwnedSpan;
+  pitch: number;
+};
+
 export type ProjectionEvent =
   | {
       duration: number;
       layer: EventLayer;
       offset: EventOffset;
+      pitchOwnerships: ProjectedPitchOwnership[];
       pitches: number[];
       type: "pitched";
       x: number;
@@ -33,7 +45,7 @@ export function buildProjectionEvents(
   totalDuration: number;
 } {
   const layerOffsets = new Map<number, number>();
-  let totalDuration = 0;
+  const totalDuration = getSegmentTotalDuration(segment);
 
   const unpositionedEvents = segment.events.map((event) => {
     const layer = event.layer ?? 0;
@@ -42,7 +54,6 @@ export function buildProjectionEvents(
     const eventEnd = offset + event.duration;
 
     layerOffsets.set(layer, eventEnd);
-    totalDuration = Math.max(totalDuration, eventEnd);
 
     switch (event.type) {
       case "note":
@@ -50,6 +61,7 @@ export function buildProjectionEvents(
           duration: event.duration,
           layer,
           offset,
+          pitchOwnerships: [{ pitch: event.pitch }],
           pitches: [event.pitch],
           type: "pitched" as const,
         };
@@ -58,6 +70,7 @@ export function buildProjectionEvents(
           duration: event.duration,
           layer,
           offset,
+          pitchOwnerships: event.pitches.map((pitch) => ({ pitch })),
           pitches: event.pitches,
           type: "pitched" as const,
         };
@@ -91,6 +104,6 @@ export function buildProjectionEvents(
     events,
     segmentWidthUnits: getSegmentWidthUnits(spacing.spacingWeightTotal),
     timePositions: spacing.timePositions,
-    totalDuration: Math.max(totalDuration, 1),
+    totalDuration,
   };
 }

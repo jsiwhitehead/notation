@@ -45,7 +45,13 @@ export type Grounding = {
   root: PitchClass;
 };
 
+export type HarmonicRegionSpan = {
+  end: number;
+  start: number;
+};
+
 export type HarmonicRegion = {
+  lanes: HarmonicRegionSpan[];
   pitchClasses: PitchClass[];
 };
 
@@ -55,6 +61,16 @@ export type HarmonicSegment = {
   grounding?: Grounding;
 };
 
+export type HarmonicSlice = {
+  duration: number;
+  harmonic: HarmonicSegment;
+  startOffset: EventOffset;
+};
+
+export type AnalyzedHarmonicSegment = HarmonicSegment & {
+  harmonicSlices: HarmonicSlice[];
+};
+
 export type HarmonicStructure = {
-  segments: HarmonicSegment[];
+  segments: AnalyzedHarmonicSegment[];
 };

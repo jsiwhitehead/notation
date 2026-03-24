@@ -117,16 +117,6 @@ function getPitch(step: string, alter: number, octave: number): number {
   return (octave + 1) * 12 + STEP_TO_SEMITONE[step]! + alter;
 }
 
-function getMeasureNumber(
-  measureElement: Element,
-  fallbackIndex: number,
-): number {
-  const numberText = measureElement.getAttribute("number");
-  const measureNumber = numberText === null ? Number.NaN : Number(numberText);
-
-  return Number.isFinite(measureNumber) ? measureNumber : fallbackIndex + 1;
-}
-
 function getVoiceKey(noteElement: Element): string {
   return getRequiredChildText(noteElement, "voice") ?? "1";
 }
@@ -475,15 +465,4 @@ export function parseMusicXml(xml: string): PieceInput {
       };
     }),
   };
-}
-
-export function getMusicXmlMeasureNumbers(xml: string): number[] {
-  const document = new DOMParser().parseFromString(xml, "application/xml");
-  const measureElements = Array.from(
-    document.querySelectorAll("score-partwise > part:first-of-type > measure"),
-  );
-
-  return measureElements.map((measureElement, index) =>
-    getMeasureNumber(measureElement, index),
-  );
 }

@@ -28,7 +28,7 @@ bun run format
 
 - `docs/architecture.md`: canonical architecture and invariant contracts.
 - `docs/authoring.md`: authored-input boundary and current authored chord-symbol model.
-- `docs/engine.md`: harmonic-engine contract and current implementation.
+- `docs/harmony.md`: harmony-stage contract and current implementation.
 - `docs/projection.md`: projection contract and current pitch-space organization.
 - `docs/render.md`: rendering contract and current SVG renderer behavior.
 - `CONTRIBUTING.md`: contributor workflow and review expectations.
@@ -38,7 +38,7 @@ bun run format
 
 - Understand system invariants: `docs/architecture.md`
 - Understand authored-input boundaries: `docs/authoring.md`
-- Understand harmonic analysis output: `docs/engine.md`
+- Understand harmonic analysis output: `docs/harmony.md`
 - Understand pitch-space projection: `docs/projection.md`
 - Understand SVG rendering behavior: `docs/render.md`
 - Check contributor workflow: `CONTRIBUTING.md`

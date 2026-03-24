@@ -1,21 +1,29 @@
 import type {
+  AnalyzedHarmonicSegment,
   EventLayer,
-  Grounding,
-  HarmonicRegion,
+  EventOffset,
+  HarmonicSegment,
   HarmonicStructure,
   PieceInput,
+  SegmentInput,
   TimeSignature,
 } from "../model";
 import { getEventPitches } from "../pitch";
-import { buildProjectionEvents, type ProjectionEvent } from "./events";
+import {
+  buildProjectionEvents,
+  type ProjectedOwnedSpan,
+  type ProjectedPitchOwnership,
+  type ProjectionEvent,
+} from "./events";
 import {
   buildProjectedGroundingOverlays,
-  type ProjectedGroundingOverlay,
+  type ProjectedGroundingMarks,
 } from "./grounding";
 import type { ProjectionTimePosition } from "./spacing";
 import {
-  buildLinkedProjectedRegions,
+  buildLinkedProjectedRegionGroups,
   type ProjectedRegion,
+  type ProjectedSpan,
   type PitchWindow,
 } from "./spans";
 
@@ -23,24 +31,38 @@ const EVENT_PITCH_WINDOW_PADDING = 1;
 const VISIBLE_PITCH_WINDOW_PADDING = 1;
 const DEFAULT_PITCH_WINDOW: PitchWindow = { maxPitch: 71, minPitch: 60 };
 
-type ProjectionPlacement = {
-  center: ProjectedRegion;
-  field: ProjectedRegion;
-  projectedGroundingOverlay: ProjectedGroundingOverlay | undefined;
+type SegmentVisibleDefaults = {
   restAnchorPitch: number;
 };
 
-type ProjectionHarmonic = {
-  center: HarmonicRegion;
-  field: HarmonicRegion;
-  grounding: Grounding | undefined;
+type ProjectionHarmonicSlice = {
+  center: ProjectedRegion;
+  duration: number;
+  endX: number;
+  field: ProjectedRegion;
+  harmonic: HarmonicSegment;
+  projectedGroundingMarks: ProjectedGroundingMarks | undefined;
+  startOffset: EventOffset;
+  startX: number;
+  touchesSegmentEnd: boolean;
+  touchesSegmentStart: boolean;
 };
 
+type ProjectionSliceGraphics = Pick<
+  ProjectionHarmonicSlice,
+  "center" | "field" | "projectedGroundingMarks"
+>;
+
+type ProjectionSliceLayout = Omit<
+  ProjectionHarmonicSlice,
+  "center" | "field" | "projectedGroundingMarks"
+>;
+
 export type ProjectionSegment = {
-  harmonic: ProjectionHarmonic;
+  harmonicSlices: ProjectionHarmonicSlice[];
   index: number;
   events: ProjectionEvent[];
-  placement: ProjectionPlacement;
+  visibleDefaults: SegmentVisibleDefaults;
   segmentWidthUnits: number;
   timeSignature: TimeSignature | undefined;
   timePositions: ProjectionTimePosition[];
@@ -52,7 +74,7 @@ export type Projection = {
   minPitch: number;
   segments: ProjectionSegment[];
 };
-export type { ProjectionEvent } from "./events";
+export type { ProjectedPitchOwnership, ProjectionEvent } from "./events";
 
 export function buildProjection(
   input: PieceInput,
@@ -61,34 +83,48 @@ export function buildProjection(
   const visibleWindow = getPaddedPieceWindow(getPitchWindow(input));
   const restAnchorPitchBySegmentAndLayer =
     getRestAnchorPitchBySegmentAndLayer(input);
-  const projectedPlacements = buildProjectedPlacements(
-    harmonicStructure,
-    restAnchorPitchBySegmentAndLayer,
-    visibleWindow,
-  );
-  const segments: ProjectionSegment[] = input.segments.map((segment, index) => {
-    const harmonicSegment = harmonicStructure.segments[index]!;
-    const placement = projectedPlacements[index]!;
+  const segmentLayouts = zipProjectionSegments(
+    input.segments,
+    harmonicStructure.segments,
+  ).map(({ harmonicSegment, index, segment }) => {
     const projectedEvents = buildProjectionEvents(
       segment,
       restAnchorPitchBySegmentAndLayer[index]!,
     );
-
     return {
       events: projectedEvents.events,
-      harmonic: {
-        center: harmonicSegment.center,
-        field: harmonicSegment.field,
-        grounding: harmonicSegment.grounding,
-      },
+      harmonicSlices: buildSliceLayoutTimings(
+        harmonicSegment,
+        projectedEvents.totalDuration,
+        projectedEvents.timePositions,
+      ),
       index,
-      placement,
+      visibleDefaults: {
+        restAnchorPitch: restAnchorPitchBySegmentAndLayer[index]!.get(0)!,
+      },
       segmentWidthUnits: projectedEvents.segmentWidthUnits,
       timeSignature: segment.timeSignature,
       timePositions: projectedEvents.timePositions,
       totalDuration: projectedEvents.totalDuration,
     };
   });
+  const projectedHarmonicSlices = buildProjectedHarmonicSlices(
+    segmentLayouts.map((segmentLayout) => segmentLayout.harmonicSlices),
+    visibleWindow,
+  );
+  const segments = segmentLayouts.map((segmentLayout, index) => ({
+    events: attachProjectedEventOwnerships(
+      segmentLayout.events,
+      projectedHarmonicSlices[index]!,
+    ),
+    harmonicSlices: projectedHarmonicSlices[index]!,
+    index: segmentLayout.index,
+    visibleDefaults: segmentLayout.visibleDefaults,
+    segmentWidthUnits: segmentLayout.segmentWidthUnits,
+    timePositions: segmentLayout.timePositions,
+    timeSignature: segmentLayout.timeSignature,
+    totalDuration: segmentLayout.totalDuration,
+  }));
 
   return {
     maxPitch: visibleWindow.maxPitch,
@@ -97,31 +133,174 @@ export function buildProjection(
   };
 }
 
-function buildProjectedPlacements(
-  harmonicStructure: HarmonicStructure,
-  restAnchorPitchBySegmentAndLayer: Map<EventLayer, number>[],
+function buildProjectedHarmonicSlices(
+  sliceLayoutsBySegment: ProjectionSliceLayout[][],
   visibleWindow: PitchWindow,
-): ProjectionPlacement[] {
-  const projectedCenters = buildLinkedProjectedRegions(
-    harmonicStructure.segments.map((segment) => segment.center),
+): ProjectionHarmonicSlice[][] {
+  const projectedSliceGraphics = buildProjectedSliceGraphics(
+    sliceLayoutsBySegment,
     visibleWindow,
   );
-  const projectedFields = buildLinkedProjectedRegions(
-    harmonicStructure.segments.map((segment) => segment.field),
+
+  return sliceLayoutsBySegment.map((sliceLayouts, segmentIndex) =>
+    sliceLayouts.map((sliceLayout, sliceIndex) => {
+      return projectHarmonicSlice(
+        sliceLayout,
+        projectedSliceGraphics[segmentIndex]![sliceIndex]!,
+      );
+    }),
+  );
+}
+
+function projectHarmonicSlice(
+  harmonicSlice: ProjectionSliceLayout,
+  projectedGraphics: ProjectionSliceGraphics,
+): ProjectionHarmonicSlice {
+  return {
+    center: projectedGraphics.center,
+    duration: harmonicSlice.duration,
+    endX: harmonicSlice.endX,
+    field: projectedGraphics.field,
+    harmonic: harmonicSlice.harmonic,
+    projectedGroundingMarks: projectedGraphics.projectedGroundingMarks,
+    startOffset: harmonicSlice.startOffset,
+    startX: harmonicSlice.startX,
+    touchesSegmentEnd: harmonicSlice.touchesSegmentEnd,
+    touchesSegmentStart: harmonicSlice.touchesSegmentStart,
+  };
+}
+
+function buildProjectedSliceGraphics(
+  sliceLayoutsBySegment: ProjectionSliceLayout[][],
+  visibleWindow: PitchWindow,
+): ProjectionSliceGraphics[][] {
+  const projectedCenters = buildLinkedProjectedRegionGroups(
+    sliceLayoutsBySegment.map((sliceLayouts) =>
+      sliceLayouts.map((sliceLayout) => sliceLayout.harmonic.center),
+    ),
+    visibleWindow,
+  );
+  const projectedFields = buildLinkedProjectedRegionGroups(
+    sliceLayoutsBySegment.map((sliceLayouts) =>
+      sliceLayouts.map((sliceLayout) => sliceLayout.harmonic.field),
+    ),
     visibleWindow,
   );
   const projectedGroundingOverlays = buildProjectedGroundingOverlays(
-    harmonicStructure,
-    projectedCenters,
-    projectedFields,
+    sliceLayoutsBySegment.flatMap((sliceLayouts) =>
+      sliceLayouts.map((sliceLayout) => ({
+        center: sliceLayout.harmonic.center,
+        field: sliceLayout.harmonic.field,
+        ...(sliceLayout.harmonic.grounding === undefined
+          ? {}
+          : { grounding: sliceLayout.harmonic.grounding }),
+      })),
+    ),
+    projectedCenters.flat(),
+    projectedFields.flat(),
+  );
+  const groupedGroundingOverlays = groupProjectedGroundingOverlays(
+    sliceLayoutsBySegment,
+    projectedGroundingOverlays,
   );
 
-  return harmonicStructure.segments.map((_, index) => ({
-    center: projectedCenters[index]!,
-    field: projectedFields[index]!,
-    projectedGroundingOverlay: projectedGroundingOverlays[index],
-    restAnchorPitch: restAnchorPitchBySegmentAndLayer[index]!.get(0)!,
-  }));
+  return sliceLayoutsBySegment.map((sliceLayouts, segmentIndex) =>
+    sliceLayouts.map((_, sliceIndex) => {
+      return {
+        center: projectedCenters[segmentIndex]![sliceIndex]!,
+        field: projectedFields[segmentIndex]![sliceIndex]!,
+        projectedGroundingMarks:
+          groupedGroundingOverlays[segmentIndex]![sliceIndex],
+      };
+    }),
+  );
+}
+
+function groupProjectedGroundingOverlays(
+  sliceLayoutsBySegment: ProjectionSliceLayout[][],
+  projectedGroundingOverlays: Array<ProjectedGroundingMarks | undefined>,
+): Array<Array<ProjectedGroundingMarks | undefined>> {
+  let nextOverlayIndex = 0;
+
+  return sliceLayoutsBySegment.map((sliceLayouts) =>
+    sliceLayouts.map(() => projectedGroundingOverlays[nextOverlayIndex++]),
+  );
+}
+
+function attachProjectedEventOwnerships(
+  events: ProjectionEvent[],
+  harmonicSlices: ProjectionHarmonicSlice[],
+): ProjectionEvent[] {
+  return events.map((event) => {
+    if (event.type !== "pitched") {
+      return event;
+    }
+
+    const owningSlice = getOwningSlice(harmonicSlices, event.offset);
+
+    return {
+      ...event,
+      pitchOwnerships: event.pitches.map((pitch) =>
+        toProjectedPitchOwnership(
+          pitch,
+          getOwningFieldSpan(owningSlice?.field.spans ?? [], pitch),
+        ),
+      ),
+    };
+  });
+}
+
+function toProjectedPitchOwnership(
+  pitch: number,
+  fieldSpan: ProjectedSpan | undefined,
+): ProjectedPitchOwnership {
+  if (fieldSpan === undefined) {
+    return { pitch };
+  }
+
+  return { fieldSpan: toProjectedOwnedSpan(fieldSpan), pitch };
+}
+
+function toProjectedOwnedSpan(fieldSpan: ProjectedSpan): ProjectedOwnedSpan {
+  return {
+    end: fieldSpan.end,
+    start: fieldSpan.start,
+  };
+}
+
+function getOwningSlice(
+  harmonicSlices: ProjectionHarmonicSlice[],
+  offset: EventOffset,
+): ProjectionHarmonicSlice | undefined {
+  return harmonicSlices
+    .filter((harmonicSlice) => sliceContainsOffset(harmonicSlice, offset))
+    .sort(
+      (left, right) =>
+        left.duration - right.duration || left.startOffset - right.startOffset,
+    )[0];
+}
+
+function getOwningFieldSpan(
+  spans: ProjectedSpan[],
+  pitch: number,
+): ProjectedSpan | undefined {
+  return spans
+    .filter((span) => span.start <= pitch && pitch <= span.end)
+    .sort(
+      (left, right) =>
+        left.end - left.start - (right.end - right.start) ||
+        left.start - right.start,
+    )[0];
+}
+
+export function sliceContainsOffset(
+  harmonicSlice: Pick<ProjectionHarmonicSlice, "duration" | "startOffset">,
+  offset: EventOffset,
+): boolean {
+  return (
+    harmonicSlice.startOffset <= offset &&
+    offset < harmonicSlice.startOffset + harmonicSlice.duration
+  );
 }
 
 function getMedianPitch(pitches: number[]): number {
@@ -134,6 +313,94 @@ function getMedianPitch(pitches: number[]): number {
 
   return Math.round(
     (sortedPitches[middleIndex - 1]! + sortedPitches[middleIndex]!) / 2,
+  );
+}
+
+function buildSliceLayoutTimings(
+  harmonicSegment: AnalyzedHarmonicSegment,
+  totalDuration: number,
+  timePositions: ProjectionTimePosition[],
+): ProjectionSliceLayout[] {
+  return harmonicSegment.harmonicSlices.map((harmonicSlice, index) => ({
+    duration: harmonicSlice.duration,
+    endX: getBoundaryX(
+      timePositions,
+      totalDuration,
+      harmonicSlice.startOffset + harmonicSlice.duration,
+    ),
+    harmonic: harmonicSlice.harmonic,
+    startOffset: harmonicSlice.startOffset,
+    startX: getBoundaryX(
+      timePositions,
+      totalDuration,
+      harmonicSlice.startOffset,
+    ),
+    touchesSegmentEnd: index === harmonicSegment.harmonicSlices.length - 1,
+    touchesSegmentStart: index === 0,
+  }));
+}
+
+function zipProjectionSegments(
+  inputSegments: SegmentInput[],
+  harmonicSegments: AnalyzedHarmonicSegment[],
+): Array<{
+  harmonicSegment: AnalyzedHarmonicSegment;
+  index: number;
+  segment: SegmentInput;
+}> {
+  if (inputSegments.length !== harmonicSegments.length) {
+    throw new Error(
+      `Projection requires one analyzed harmonic segment per input segment (got ${harmonicSegments.length} for ${inputSegments.length}).`,
+    );
+  }
+
+  return inputSegments.map((segment, index) => ({
+    harmonicSegment: harmonicSegments[index]!,
+    index,
+    segment,
+  }));
+}
+
+function getBoundaryX(
+  timePositions: ProjectionTimePosition[],
+  totalDuration: number,
+  offset: EventOffset,
+): number {
+  if (offset <= 0) {
+    return 0;
+  }
+
+  if (offset >= totalDuration) {
+    return 1;
+  }
+
+  const exactTimePosition = timePositions.find(
+    (timePosition) => timePosition.offset === offset,
+  );
+
+  if (exactTimePosition !== undefined) {
+    return exactTimePosition.x;
+  }
+
+  const previousTimePosition = [...timePositions]
+    .reverse()
+    .find((timePosition) => timePosition.offset < offset);
+  const nextTimePosition = timePositions.find(
+    (timePosition) => timePosition.offset > offset,
+  );
+  const previousOffset = previousTimePosition?.offset ?? 0;
+  const previousX = previousTimePosition?.x ?? 0;
+  const nextOffset = nextTimePosition?.offset ?? totalDuration;
+  const nextX = nextTimePosition?.x ?? 1;
+
+  if (nextOffset === previousOffset) {
+    return previousX;
+  }
+
+  return (
+    previousX +
+    ((offset - previousOffset) / (nextOffset - previousOffset)) *
+      (nextX - previousX)
   );
 }
 

@@ -4,11 +4,11 @@ This document defines the authored-input side of the system as it exists in this
 
 ## Principles
 
-The authored input language remains open so long as it normalizes into the canonical input consumed by the harmonic engine.
+The authored input language remains open so long as it normalizes into the canonical input consumed by the harmony stage.
 
-`docs/engine.md` is authoritative for the current canonical input contract consumed by the engine.
+`docs/harmony.md` is authoritative for the current canonical input contract consumed by the harmony stage.
 
-The harmonic engine is the next stage after authored input normalization. Authoring remains upstream of harmonic structure and does not contain derived harmonic analysis.
+The harmony stage is the next stage after authored input normalization. Authoring remains upstream of harmonic structure and does not contain derived harmonic analysis.
 
 ## Authored inputs
 
@@ -35,4 +35,4 @@ Earlier codebases explored three broad authored-input approaches above the same 
 - structure-first input, where direct objects or arrays describe segments, events, durations, notes, rests, and optional chord symbols
 - evidence-first input, where recent note material over time is treated as the starting point for local harmonic settlement
 
-All three fit the same architectural rule so long as they normalize into the canonical input consumed by the harmonic engine.
+All three fit the same architectural rule so long as they normalize into the canonical input consumed by the harmony stage.

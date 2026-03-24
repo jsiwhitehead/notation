@@ -1,4 +1,4 @@
-import type { Grounding, HarmonicStructure, PitchClass } from "../model";
+import type { Grounding, PitchClass } from "../model";
 import { repeatPitchClassesAcrossRange } from "../pitch";
 import type { ProjectedRegion, PitchWindow } from "./spans";
 
@@ -7,20 +7,24 @@ type ProjectedGroundingMark = {
   type: "ground" | "root";
 };
 
-export type ProjectedGroundingOverlay = {
+export type ProjectedGroundingMarks = {
   marks: ProjectedGroundingMark[];
   groundPitchClass: PitchClass;
   rootPitchClass: PitchClass;
 };
 
+type GroundedRegion = {
+  grounding?: Grounding;
+};
+
 export function buildProjectedGroundingOverlays(
-  harmonicStructure: HarmonicStructure,
+  groundedRegions: GroundedRegion[],
   projectedCenters: ProjectedRegion[],
   projectedFields: ProjectedRegion[],
-): (ProjectedGroundingOverlay | undefined)[] {
-  return harmonicStructure.segments.map((segment, index) =>
-    buildProjectedGroundingOverlay(
-      segment.grounding,
+): (ProjectedGroundingMarks | undefined)[] {
+  return groundedRegions.map((region, index) =>
+    buildProjectedGroundingMarkSet(
+      region.grounding,
       getProjectedGroundingWindow(
         projectedCenters[index]!,
         projectedFields[index]!,
@@ -29,10 +33,10 @@ export function buildProjectedGroundingOverlays(
   );
 }
 
-function buildProjectedGroundingOverlay(
+function buildProjectedGroundingMarkSet(
   grounding: Grounding | undefined,
   projectedGroundingWindow: PitchWindow | undefined,
-): ProjectedGroundingOverlay | undefined {
+): ProjectedGroundingMarks | undefined {
   if (grounding === undefined || projectedGroundingWindow === undefined) {
     return undefined;
   }

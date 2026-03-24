@@ -6,12 +6,16 @@ export function mod(value: number, divisor: number): number {
   return ((value % divisor) + divisor) % divisor;
 }
 
-function mod12(value: number): number {
+export function mod12(value: number): number {
   return mod(value, 12);
 }
 
 function getCircularInterval(start: number, end: number, size: number): number {
   return mod(end - start, size);
+}
+
+export function getCircularInterval12(start: number, end: number): number {
+  return getCircularInterval(start, end, 12);
 }
 
 export function toPitchClass(value: number): PitchClass {
@@ -24,15 +28,6 @@ export function toFifthsPosition(pitchClass: PitchClass): number {
 
 export function uniqueSortedPitchClasses(values: PitchClass[]): PitchClass[] {
   return [...new Set(values)].sort((left, right) => left - right);
-}
-
-export function uniqueFifthsOrderedPitchClasses(
-  values: PitchClass[],
-): PitchClass[] {
-  return [...new Set(values)].sort(
-    (left, right) =>
-      toFifthsPosition(left) - toFifthsPosition(right) || left - right,
-  );
 }
 
 export function toPitchClassFromFifthsPosition(position: number): PitchClass {
@@ -76,48 +71,45 @@ export function getLargestFifthsGap(
   };
 }
 
-export function fillFifthsGaps(
+export type ToneSpacedPitchClassSpan = {
+  end: number;
+  start: number;
+};
+
+export function buildToneSpacedPitchClassSpans(
   pitchClasses: PitchClass[],
-  maxGapFillSize: number,
-): PitchClass[] {
-  const positions = getOrderedFifthsPositions(pitchClasses);
-  const filled = new Set(positions);
+): ToneSpacedPitchClassSpan[] {
+  if (pitchClasses.length === 0) {
+    return [];
+  }
 
-  positions.forEach((position, index) => {
-    const nextPosition = positions[(index + 1) % positions.length]!;
-    const gap = getCircularInterval(position, nextPosition, FIFTHS_CYCLE_SIZE);
+  const sortedPitchClasses = [...new Set(pitchClasses)].sort(
+    (left, right) => left - right,
+  );
+  const spans: ToneSpacedPitchClassSpan[] = [
+    { end: sortedPitchClasses[0]!, start: sortedPitchClasses[0]! },
+  ];
 
-    if (gap <= 1 || gap > maxGapFillSize) {
+  sortedPitchClasses.slice(1).forEach((pitchClass) => {
+    const currentSpan = spans[spans.length - 1]!;
+
+    if (pitchClass - currentSpan.end === 2) {
+      currentSpan.end = pitchClass;
       return;
     }
 
-    for (let step = 1; step < gap; step += 1) {
-      filled.add(mod(position + step, FIFTHS_CYCLE_SIZE));
-    }
+    spans.push({ end: pitchClass, start: pitchClass });
   });
 
-  return uniqueSortedPitchClasses(
-    [...filled].map(toPitchClassFromFifthsPosition),
-  );
-}
-
-export function hasAdjacentSemitonePairs(pitchClasses: PitchClass[]): boolean {
-  const sorted = uniqueSortedPitchClasses(pitchClasses);
-
-  if (sorted.length < 3) {
-    return false;
+  if (
+    spans.length > 1 &&
+    sortedPitchClasses[0]! + 12 - spans[spans.length - 1]!.end === 2
+  ) {
+    spans[spans.length - 1]!.end = spans[0]!.end + 12;
+    spans.shift();
   }
 
-  const intervals = sorted.map((pitchClass, index) => {
-    const nextPitchClass = sorted[(index + 1) % sorted.length]!;
-
-    return getCircularInterval(pitchClass, nextPitchClass, 12);
-  });
-
-  return intervals.some(
-    (interval, index) =>
-      interval === 1 && intervals[(index + 1) % intervals.length] === 1,
-  );
+  return spans;
 }
 
 export function getRegionMidpointInHalfFifths(

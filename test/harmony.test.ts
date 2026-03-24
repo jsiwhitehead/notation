@@ -1,9 +1,89 @@
 import { describe, expect, test } from "bun:test";
 
-import { runEngine } from "../src/engine";
-import { uniqueFifthsOrderedPitchClasses } from "../src/pitch";
+import { normalizeChordSymbol } from "../src/harmony/chord";
+import { buildRegion } from "../src/harmony/region";
+import { runEngine } from "../src/harmony";
 
 import type { HarmonicRegion, PieceInput, SegmentInput } from "../src/model";
+
+describe("normalizeChordSymbol", () => {
+  test("normalizes whitespace and letter case", () => {
+    expect(normalizeChordSymbol("  gSuS4  ")).toEqual({
+      groundPitchClass: 7,
+      pitchClasses: [0, 2, 7],
+      rootPitchClass: 7,
+    });
+  });
+
+  test("supports 6/9 without forcing a dominant seventh", () => {
+    expect(normalizeChordSymbol("C6/9")).toEqual({
+      groundPitchClass: 0,
+      pitchClasses: [0, 2, 4, 7, 9],
+      rootPitchClass: 0,
+    });
+  });
+
+  test("adds a natural eleventh for 11 chords", () => {
+    expect(normalizeChordSymbol("C11")).toEqual({
+      groundPitchClass: 0,
+      pitchClasses: [0, 4, 5, 7, 10],
+      rootPitchClass: 0,
+    });
+  });
+
+  test("supports slash-ground grounding", () => {
+    expect(normalizeChordSymbol("Dmin7/A")).toEqual({
+      groundPitchClass: 9,
+      pitchClasses: [0, 2, 5, 9],
+      rootPitchClass: 2,
+    });
+  });
+
+  test("supports enharmonic root spellings", () => {
+    expect(normalizeChordSymbol("Dbmaj7")).toEqual({
+      groundPitchClass: 1,
+      pitchClasses: [0, 1, 5, 8],
+      rootPitchClass: 1,
+    });
+    expect(normalizeChordSymbol("Cbmaj")).toEqual({
+      groundPitchClass: 11,
+      pitchClasses: [3, 6, 11],
+      rootPitchClass: 11,
+    });
+  });
+
+  test("supports major, minor, diminished, and augmented qualities", () => {
+    expect(normalizeChordSymbol("Cmaj")?.pitchClasses).toEqual([0, 4, 7]);
+    expect(normalizeChordSymbol("Dmin")?.pitchClasses).toEqual([2, 5, 9]);
+    expect(normalizeChordSymbol("Bdim7")?.pitchClasses).toEqual([2, 5, 8, 11]);
+    expect(normalizeChordSymbol("Caug")?.pitchClasses).toEqual([0, 4, 8]);
+  });
+
+  test("supports suspension and alterations", () => {
+    expect(normalizeChordSymbol("Dsus2")?.pitchClasses).toEqual([2, 4, 9]);
+    expect(normalizeChordSymbol("Gsus4")?.pitchClasses).toEqual([0, 2, 7]);
+    expect(normalizeChordSymbol("C7#5")?.pitchClasses).toEqual([0, 4, 8, 10]);
+    expect(normalizeChordSymbol("C7b5")?.pitchClasses).toEqual([0, 4, 6, 10]);
+    expect(normalizeChordSymbol("C7b9#11")?.pitchClasses).toEqual([
+      0, 1, 4, 6, 7, 10,
+    ]);
+  });
+
+  test("supports upper extensions", () => {
+    expect(normalizeChordSymbol("C9")?.pitchClasses).toEqual([0, 2, 4, 7, 10]);
+    expect(normalizeChordSymbol("C13")?.pitchClasses).toEqual([0, 4, 7, 9, 10]);
+  });
+
+  test("returns undefined for invalid symbols", () => {
+    expect(normalizeChordSymbol("not-a-chord")).toBeUndefined();
+    expect(normalizeChordSymbol("")).toBeUndefined();
+    expect(normalizeChordSymbol("Cmaj/not-a-note")).toBeUndefined();
+  });
+
+  test("does not misread maj7 as minor", () => {
+    expect(normalizeChordSymbol("Cmaj7")?.pitchClasses).toEqual([0, 4, 7, 11]);
+  });
+});
 
 function getSegment(input: PieceInput) {
   return runEngine(input).segments[0]!;
@@ -20,34 +100,47 @@ function expectSingleSegmentCenter(
   expectRegionPitchClasses(getSingleSegment(segment).center, pitchClasses);
 }
 
-function hasAdjacentSemitonePairs(pitchClasses: number[]): boolean {
-  const sorted = [...new Set(pitchClasses)].sort((left, right) => left - right);
-
-  if (sorted.length < 3) {
-    return false;
-  }
-
-  const intervals = sorted.map((pitchClass, index) => {
-    const nextPitchClass = sorted[(index + 1) % sorted.length]!;
-
-    return (nextPitchClass - pitchClass + 12) % 12;
-  });
-
-  return intervals.some(
-    (interval, index) =>
-      interval === 1 && intervals[(index + 1) % intervals.length] === 1,
-  );
-}
-
 function expectRegionPitchClasses(
   region: HarmonicRegion,
   pitchClasses: number[],
 ): void {
-  expect(region).toEqual({
-    pitchClasses: uniqueFifthsOrderedPitchClasses(pitchClasses),
-  });
-  expect(hasAdjacentSemitonePairs(region.pitchClasses)).toBe(false);
+  expect([...region.pitchClasses].sort((a, b) => a - b)).toEqual(
+    [...pitchClasses].sort((a, b) => a - b),
+  );
 }
+
+describe("buildRegion", () => {
+  test("derives canonical lanes for a diatonic two-span region", () => {
+    expect(buildRegion([0, 2, 4, 5, 7, 9, 11])).toMatchObject({
+      lanes: [
+        { end: 4, start: 0 },
+        { end: 11, start: 5 },
+      ],
+      pitchClasses: [0, 7, 2, 9, 4, 11, 5],
+    });
+  });
+
+  test("derives canonical lanes for a paired fourth-chain region", () => {
+    expect(buildRegion([0, 7, 2, 9])).toMatchObject({
+      lanes: [
+        { end: 2, start: 0 },
+        { end: 9, start: 7 },
+      ],
+      pitchClasses: [0, 7, 2, 9],
+    });
+  });
+
+  test("keeps semitone-adjacent clusters as separate single-step lanes", () => {
+    expect(buildRegion([11, 0, 1])).toMatchObject({
+      lanes: [
+        { end: 0, start: 0 },
+        { end: 1, start: 1 },
+        { end: 11, start: 11 },
+      ],
+      pitchClasses: [0, 11, 1],
+    });
+  });
+});
 
 describe("runEngine", () => {
   describe("single-segment local filling", () => {
@@ -114,7 +207,47 @@ describe("runEngine", () => {
 
       expectRegionPitchClasses(segment.center, [0, 6]);
       expectRegionPitchClasses(segment.field, [0, 6]);
-      expect(segment.grounding).toEqual({ ground: 0, root: 0 });
+      expect(segment.grounding).toBeUndefined();
+    });
+
+    test("fills a two-note dyad along the unique shorter fifths path", () => {
+      const segment = getSingleSegment({
+        events: [
+          { duration: 1, pitch: 67, type: "note" },
+          { duration: 1, pitch: 71, type: "note" },
+        ],
+      });
+
+      expectRegionPitchClasses(segment.center, [7, 2, 9, 4, 11]);
+      expectRegionPitchClasses(segment.field, [7, 2, 9, 4, 11]);
+      expect(segment.grounding).toBeUndefined();
+    });
+
+    test("keeps a two-note tritone dyad unfilled when the fifths path is ambiguous", () => {
+      const segment = getSingleSegment({
+        events: [
+          { duration: 1, pitch: 60, type: "note" },
+          { duration: 1, pitch: 66, type: "note" },
+        ],
+      });
+
+      expectRegionPitchClasses(segment.center, [0, 6]);
+      expectRegionPitchClasses(segment.field, [0, 6]);
+      expect(segment.grounding).toBeUndefined();
+    });
+
+    test("fills a uniquely implied up-to-tritone fifths run for three-note evidence", () => {
+      const segment = getSingleSegment({
+        events: [
+          { duration: 1, pitch: 60, type: "note" },
+          { duration: 1, pitch: 62, type: "note" },
+          { duration: 1, pitch: 66, type: "note" },
+        ],
+      });
+
+      expectRegionPitchClasses(segment.center, [0, 7, 2, 9, 4, 11, 6]);
+      expectRegionPitchClasses(segment.field, [0, 7, 2, 9, 4, 11, 6]);
+      expect(segment.grounding).toBeUndefined();
     });
 
     test("uses chord root and ground to orient local grounding", () => {
@@ -150,18 +283,18 @@ describe("runEngine", () => {
       expect(segment.grounding).toEqual({ ground: 0, root: 0 });
     });
 
-    test("keeps augmented-triad evidence sparse rather than forcing a run", () => {
+    test("treats augmented-triad evidence as invalid under the baseline two-span rule", () => {
       const segment = getSingleSegment({
         chordSymbol: "Caug",
         events: [],
       });
 
-      expectRegionPitchClasses(segment.center, [0, 4, 8]);
-      expectRegionPitchClasses(segment.field, [0, 4, 8]);
+      expectRegionPitchClasses(segment.center, []);
+      expectRegionPitchClasses(segment.field, []);
       expect(segment.grounding).toEqual({ ground: 0, root: 0 });
     });
 
-    test("keeps diminished-seventh evidence sparse rather than forcing a run", () => {
+    test("treats diminished-seventh evidence as invalid when its paired lanes overlap", () => {
       const segment = getSingleSegment({
         chordSymbol: "Bdim7",
         events: [],
@@ -183,7 +316,7 @@ describe("runEngine", () => {
 
       expectRegionPitchClasses(segment.center, [0, 7, 2, 9, 4, 11, 6]);
       expectRegionPitchClasses(segment.field, [0, 7, 2, 9, 4, 11, 6]);
-      expect(segment.grounding).toEqual({ ground: 0, root: 0 });
+      expect(segment.grounding).toBeUndefined();
     });
 
     test("keeps a direct chromatic three-note cluster out of center and field", () => {
@@ -200,7 +333,7 @@ describe("runEngine", () => {
       expect(segment.grounding).toBeUndefined();
     });
 
-    test("keeps a longer direct chromatic run out of center and field", () => {
+    test("rescues a longer direct chromatic run when filling reaches a paired baseline region", () => {
       const segment = getSingleSegment({
         events: [
           { duration: 1, pitch: 60, type: "note" },
@@ -210,8 +343,8 @@ describe("runEngine", () => {
         ],
       });
 
-      expectRegionPitchClasses(segment.center, []);
-      expectRegionPitchClasses(segment.field, []);
+      expectRegionPitchClasses(segment.center, [0, 7, 2, 1, 8, 3, 10, 5]);
+      expectRegionPitchClasses(segment.field, [0, 7, 2, 1, 8, 3, 10, 5]);
       expect(segment.grounding).toBeUndefined();
     });
 
@@ -234,9 +367,9 @@ describe("runEngine", () => {
         ],
       });
 
-      expectRegionPitchClasses(segment.center, [1, 2, 4, 5, 7, 9, 11]);
-      expectRegionPitchClasses(segment.field, [1, 2, 4, 5, 7, 9, 11]);
-      expect(segment.grounding).toEqual({ ground: 7, root: 7 });
+      expectRegionPitchClasses(segment.center, [7, 2, 9, 4, 11, 1, 5]);
+      expectRegionPitchClasses(segment.field, [7, 2, 9, 4, 11, 1, 5]);
+      expect(segment.grounding).toBeUndefined();
     });
 
     test("keeps an extension-bearing local center as one direct evidence set", () => {
@@ -261,7 +394,7 @@ describe("runEngine", () => {
       expect(segment.grounding).toEqual({ ground: 0, root: 0 });
     });
 
-    test("keeps altered extension evidence sparse rather than collapsing to a plain run", () => {
+    test("treats altered extension evidence as invalid when its paired lanes overlap", () => {
       const segment = getSingleSegment({
         chordSymbol: "C7#11",
         events: [],
@@ -304,6 +437,81 @@ describe("runEngine", () => {
       expect(reversed.center).toEqual(forward.center);
       expect(reversed.field).toEqual(forward.field);
       expect(reversed.grounding).toEqual(forward.grounding);
+    });
+
+    test("treats later diatonic filling as completion of one local harmonic region", () => {
+      const segment = getSingleSegment({
+        events: [
+          { duration: 1, offset: 0, pitch: 60, type: "note" },
+          { duration: 1, offset: 1, pitch: 62, type: "note" },
+          { duration: 1, offset: 2, pitch: 64, type: "note" },
+          { duration: 1, offset: 3, pitch: 65, type: "note" },
+        ],
+        timeSignature: { beatType: 4, beats: 4 },
+      });
+
+      expectRegionPitchClasses(segment.center, [0, 7, 2, 9, 4, 5]);
+      expectRegionPitchClasses(segment.field, [0, 7, 2, 9, 4, 5]);
+      expect(segment.grounding).toBeUndefined();
+    });
+
+    test("keeps a chromatic passing note inside the underlying local harmonic region", () => {
+      const segment = getSingleSegment({
+        events: [
+          { duration: 1, offset: 0, pitch: 64, type: "note" },
+          { duration: 1, offset: 1, pitch: 65, type: "note" },
+          { duration: 1, offset: 2, pitch: 67, type: "note" },
+          { duration: 0.5, offset: 3, pitch: 66, type: "note" },
+        ],
+        timeSignature: { beatType: 4, beats: 4 },
+      });
+
+      expectRegionPitchClasses(segment.center, [0, 7, 2, 9, 4, 5]);
+      expectRegionPitchClasses(segment.field, [0, 7, 2, 9, 4, 5]);
+      expect(segment.grounding).toBeUndefined();
+    });
+
+    test("moves to a new local harmonic region when the following segment confirms the chromatic reinterpretation", () => {
+      const structure = runEngine({
+        segments: [
+          {
+            events: [
+              { duration: 1, offset: 0, pitch: 64, type: "note" },
+              { duration: 1, offset: 1, pitch: 65, type: "note" },
+              { duration: 1, offset: 2, pitch: 67, type: "note" },
+              { duration: 0.5, offset: 3.5, pitch: 66, type: "note" },
+            ],
+            timeSignature: { beatType: 4, beats: 4 },
+          },
+          {
+            events: [
+              { duration: 1, offset: 0, pitch: 64, type: "note" },
+              { duration: 1, offset: 1, pitch: 66, type: "note" },
+              { duration: 1, offset: 2, pitch: 67, type: "note" },
+            ],
+            timeSignature: { beatType: 4, beats: 4 },
+          },
+        ],
+      });
+
+      expectRegionPitchClasses(
+        structure.segments[0]!.center,
+        [0, 7, 2, 9, 4, 5],
+      );
+      expectRegionPitchClasses(
+        structure.segments[0]!.field,
+        [0, 7, 2, 9, 4, 5],
+      );
+      expect(structure.segments[0]!.grounding).toBeUndefined();
+      expectRegionPitchClasses(
+        structure.segments[1]!.center,
+        [7, 2, 9, 4, 11, 6],
+      );
+      expectRegionPitchClasses(
+        structure.segments[1]!.field,
+        [7, 2, 9, 4, 11, 6],
+      );
+      expect(structure.segments[1]!.grounding).toBeUndefined();
     });
   });
 
@@ -523,5 +731,63 @@ describe("runEngine", () => {
 
     expectRegionPitchClasses(structure.segments[0]!.center, [0, 7, 2, 9, 4]);
     expectRegionPitchClasses(structure.segments[0]!.field, [0, 7, 2, 9, 4]);
+  });
+
+  test("prefers the later split onset when two slice boundaries tie on score", () => {
+    const structure = runEngine({
+      segments: [
+        {
+          events: [
+            { duration: 0.25, layer: 0, offset: 0, pitch: 81, type: "note" },
+            { duration: 1.5, layer: 1, offset: 0, pitch: 53, type: "note" },
+            { duration: 0.25, layer: 0, offset: 0.25, pitch: 83, type: "note" },
+            { duration: 0.25, layer: 0, offset: 0.5, pitch: 84, type: "note" },
+            { duration: 0.25, layer: 0, offset: 0.75, pitch: 83, type: "note" },
+            { duration: 0.25, layer: 0, offset: 1, pitch: 81, type: "note" },
+            { duration: 0.25, layer: 0, offset: 1.25, pitch: 79, type: "note" },
+            { duration: 0.25, layer: 0, offset: 1.5, pitch: 77, type: "note" },
+            { duration: 0.5, layer: 1, offset: 1.5, pitch: 55, type: "note" },
+            { duration: 0.25, layer: 0, offset: 1.75, pitch: 76, type: "note" },
+            { duration: 0.25, layer: 0, offset: 2, pitch: 77, type: "note" },
+            { duration: 1.5, layer: 1, offset: 2, pitch: 57, type: "note" },
+            { duration: 0.25, layer: 0, offset: 2.25, pitch: 79, type: "note" },
+            { duration: 0.25, layer: 0, offset: 2.5, pitch: 81, type: "note" },
+            { duration: 0.25, layer: 0, offset: 2.75, pitch: 79, type: "note" },
+            { duration: 0.25, layer: 0, offset: 3, pitch: 77, type: "note" },
+            { duration: 0.25, layer: 0, offset: 3.25, pitch: 76, type: "note" },
+            { duration: 0.5, layer: 1, offset: 3.5, pitch: 54, type: "note" },
+            { duration: 0.25, layer: 0, offset: 3.5, pitch: 74, type: "note" },
+            { duration: 0.25, layer: 0, offset: 3.75, pitch: 72, type: "note" },
+          ],
+          timeSignature: { beatType: 4, beats: 4 },
+        },
+      ],
+    });
+
+    expect(structure.segments[0]!.harmonicSlices).toHaveLength(2);
+    expect(structure.segments[0]!.harmonicSlices[0]).toMatchObject({
+      duration: 3.5,
+      startOffset: 0,
+    });
+    expect(structure.segments[0]!.harmonicSlices[1]).toMatchObject({
+      duration: 0.5,
+      startOffset: 3.5,
+    });
+    expectRegionPitchClasses(
+      structure.segments[0]!.harmonicSlices[0]!.harmonic.center,
+      [0, 7, 2, 9, 4, 11, 5],
+    );
+    expectRegionPitchClasses(
+      structure.segments[0]!.harmonicSlices[0]!.harmonic.field,
+      [0, 7, 2, 9, 4, 11, 5],
+    );
+    expectRegionPitchClasses(
+      structure.segments[0]!.harmonicSlices[1]!.harmonic.center,
+      [0, 7, 2, 9, 4, 11, 6],
+    );
+    expectRegionPitchClasses(
+      structure.segments[0]!.harmonicSlices[1]!.harmonic.field,
+      [0, 7, 2, 9, 4, 11, 6],
+    );
   });
 });
