@@ -8,7 +8,11 @@ import type {
   SegmentInput,
   TimeSignature,
 } from "../model";
-import { getEventPitches } from "../pitch";
+import {
+  getEventPitches,
+  repeatPitchClassesAcrossRange,
+  toPitchClass,
+} from "../pitch";
 import {
   buildProjectionEvents,
   type ProjectedOwnedSpan,
@@ -60,6 +64,7 @@ type ProjectionSliceLayout = Omit<
 
 export type ProjectionSegment = {
   harmonicSlices: ProjectionHarmonicSlice[];
+  globalHighlightPitch?: number;
   index: number;
   events: ProjectionEvent[];
   visibleDefaults: SegmentVisibleDefaults;
@@ -108,6 +113,7 @@ export function buildProjection(
       totalDuration: projectedEvents.totalDuration,
     };
   });
+  const globalHighlightPitch = getGlobalHighlightPitch(input, visibleWindow);
   const projectedHarmonicSlices = buildProjectedHarmonicSlices(
     segmentLayouts.map((segmentLayout) => segmentLayout.harmonicSlices),
     visibleWindow,
@@ -119,6 +125,7 @@ export function buildProjection(
     ),
     harmonicSlices: projectedHarmonicSlices[index]!,
     index: segmentLayout.index,
+    ...(globalHighlightPitch === undefined ? {} : { globalHighlightPitch }),
     visibleDefaults: segmentLayout.visibleDefaults,
     segmentWidthUnits: segmentLayout.segmentWidthUnits,
     timePositions: segmentLayout.timePositions,
@@ -131,6 +138,107 @@ export function buildProjection(
     minPitch: visibleWindow.minPitch,
     segments,
   };
+}
+
+function getGlobalHighlightPitch(
+  input: PieceInput,
+  visibleWindow: PitchWindow,
+): number | undefined {
+  const pitchClassWeights = new Map<number, number>();
+  let totalPitchWeight = 0;
+  let weightedPitchSum = 0;
+
+  input.segments.forEach((segment) => {
+    segment.events.forEach((event) => {
+      const pitches = getEventPitches(event);
+
+      pitches.forEach((pitch) => {
+        const pitchClass = toPitchClass(pitch);
+        const nextWeight =
+          (pitchClassWeights.get(pitchClass) ?? 0) + event.duration;
+
+        pitchClassWeights.set(pitchClass, nextWeight);
+        totalPitchWeight += event.duration;
+        weightedPitchSum += pitch * event.duration;
+      });
+    });
+  });
+
+  if (pitchClassWeights.size === 0 || totalPitchWeight <= 0) {
+    return undefined;
+  }
+
+  const weightedMeanPitch = weightedPitchSum / totalPitchWeight;
+  const highlightPitchClass = [...pitchClassWeights.entries()].reduce(
+    (best, candidate) => {
+      if (best === undefined || candidate[1] > best[1]) {
+        return candidate;
+      }
+
+      if (candidate[1] < best[1]) {
+        return best;
+      }
+
+      const bestPitch = getClosestRepeatedPitch(
+        visibleWindow,
+        best[0],
+        weightedMeanPitch,
+      );
+      const candidatePitch = getClosestRepeatedPitch(
+        visibleWindow,
+        candidate[0],
+        weightedMeanPitch,
+      );
+
+      if (bestPitch === undefined) {
+        return candidate;
+      }
+
+      if (candidatePitch === undefined) {
+        return best;
+      }
+
+      return Math.abs(candidatePitch - weightedMeanPitch) <
+        Math.abs(bestPitch - weightedMeanPitch)
+        ? candidate
+        : best;
+    },
+    undefined as [number, number] | undefined,
+  )?.[0];
+
+  return highlightPitchClass === undefined
+    ? undefined
+    : getClosestRepeatedPitch(
+        visibleWindow,
+        highlightPitchClass,
+        weightedMeanPitch,
+      );
+}
+
+function getClosestRepeatedPitch(
+  visibleWindow: PitchWindow,
+  pitchClass: number,
+  targetPitch: number,
+): number | undefined {
+  const repeatedPitches = repeatPitchClassesAcrossRange(
+    visibleWindow.maxPitch,
+    visibleWindow.minPitch,
+    [pitchClass],
+  );
+
+  return repeatedPitches.reduce<number | undefined>((best, candidate) => {
+    if (best === undefined) {
+      return candidate;
+    }
+
+    const candidateDistance = Math.abs(candidate - targetPitch);
+    const bestDistance = Math.abs(best - targetPitch);
+
+    return candidateDistance < bestDistance ||
+      (candidateDistance === bestDistance && candidate < best)
+      ? candidate
+      : best;
+  }, undefined);
 }
 
 function buildProjectedHarmonicSlices(

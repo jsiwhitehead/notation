@@ -37,6 +37,17 @@ type BuiltProjectedRegion = {
   pairedSlots?: [BuiltProjectedSlot, BuiltProjectedSlot];
 };
 
+type OrderedSlotPair = {
+  currentSlot: BuiltProjectedSlot;
+  nextSlot: BuiltProjectedSlot;
+  nextSlotNormalizationOffset: number;
+};
+
+type ResolvedSlotJoinPlan = {
+  octaveDisplacement: number;
+  orderedSlotPairs: [OrderedSlotPair, OrderedSlotPair];
+};
+
 function repeatRegionSpanClassesAcrossRange(
   visibleWindow: PitchWindow,
   regionSpanClass: RegionSpanClass,
@@ -128,24 +139,96 @@ function connectProjectedSpans(
     return;
   }
 
-  const pairMode = getProjectedPairMode(currentSlots, nextSlots);
+  const joinPlan = resolveSlotJoinPlan(currentSlots, nextSlots);
 
-  if (pairMode === undefined) {
+  if (joinPlan === undefined) {
     return;
   }
 
-  const nextByCurrent = pairMode === "straight" ? [0, 1] : [1, 0];
+  joinPlan.orderedSlotPairs.forEach(
+    ({ currentSlot, nextSlot, nextSlotNormalizationOffset }) => {
+      connectProjectedSlots(
+        currentSlot,
+        nextSlot,
+        nextSlotNormalizationOffset + joinPlan.octaveDisplacement,
+      );
+    },
+  );
+}
 
-  nextByCurrent.forEach((nextIndex, currentIndex) => {
-    const currentSlot = currentSlots[currentIndex]!;
-    const nextSlot = nextSlots[nextIndex]!;
+function resolveSlotJoinPlan(
+  currentSlots: [BuiltProjectedSlot, BuiltProjectedSlot],
+  nextSlots: [BuiltProjectedSlot, BuiltProjectedSlot],
+): ResolvedSlotJoinPlan | undefined {
+  const pairMode = getProjectedPairMode(currentSlots, nextSlots);
 
-    if (getSpanOverlap(currentSlot.spanClass, nextSlot.spanClass) <= 0) {
-      return;
-    }
+  if (pairMode === undefined) {
+    return undefined;
+  }
 
-    connectProjectedSlots(currentSlot, nextSlot);
-  });
+  const orderedSlotPairs = normalizeOrderedSlotPairs(
+    (pairMode === "straight"
+      ? [
+          [currentSlots[0]!, nextSlots[0]!],
+          [currentSlots[1]!, nextSlots[1]!],
+        ]
+      : [
+          [currentSlots[0]!, nextSlots[1]!],
+          [currentSlots[1]!, nextSlots[0]!],
+        ]) as [
+      [BuiltProjectedSlot, BuiltProjectedSlot],
+      [BuiltProjectedSlot, BuiltProjectedSlot],
+    ],
+  );
+  const octaveDisplacement = getSharedOctaveDisplacement(orderedSlotPairs);
+  const bestDisplacementScore = getSharedOctaveDisplacementScore(
+    orderedSlotPairs,
+    octaveDisplacement,
+  );
+
+  if (bestDisplacementScore <= 0) {
+    return undefined;
+  }
+
+  return {
+    octaveDisplacement,
+    orderedSlotPairs,
+  };
+}
+
+function normalizeOrderedSlotPairs(
+  slotPairs: [
+    [BuiltProjectedSlot, BuiltProjectedSlot],
+    [BuiltProjectedSlot, BuiltProjectedSlot],
+  ],
+): [OrderedSlotPair, OrderedSlotPair] {
+  const [firstPair, secondPair] = slotPairs;
+  const leftOrder = Math.sign(
+    getSpanMidpoint(firstPair[0].spanClass) -
+      getSpanMidpoint(secondPair[0].spanClass),
+  );
+  const rightOrder = Math.sign(
+    getSpanMidpoint(firstPair[1].spanClass) -
+      getSpanMidpoint(secondPair[1].spanClass),
+  );
+
+  return [
+    {
+      currentSlot: firstPair[0],
+      nextSlot: firstPair[1],
+      nextSlotNormalizationOffset: 0,
+    },
+    {
+      currentSlot: secondPair[0],
+      nextSlot: secondPair[1],
+      nextSlotNormalizationOffset:
+        leftOrder !== 0 && rightOrder !== 0 && leftOrder !== rightOrder
+          ? leftOrder < 0
+            ? 12
+            : -12
+          : 0,
+    },
+  ];
 }
 
 function getProjectedPairMode(
@@ -167,14 +250,21 @@ function getProjectedPairMode(
 }
 
 function getSpanOverlap(left: Span, right: Span): number {
-  const overlapStart = Math.max(left.start, right.start);
-  const overlapEnd = Math.min(left.end, right.end);
+  const leftPitchClasses = new Set(getSpanPitchClasses(left));
 
-  if (overlapStart > overlapEnd) {
-    return 0;
+  return getSpanPitchClasses(right).filter((pitchClass) =>
+    leftPitchClasses.has(pitchClass),
+  ).length;
+}
+
+function getSpanPitchClasses(span: Span): PitchClass[] {
+  const pitchClasses: PitchClass[] = [];
+
+  for (let pitch = span.start; pitch <= span.end; pitch += 2) {
+    pitchClasses.push(mod(pitch, 12));
   }
 
-  return overlapEnd - overlapStart + 1;
+  return [...new Set(pitchClasses)];
 }
 
 function projectSpanClasses(
@@ -185,7 +275,6 @@ function projectSpanClasses(
     .flatMap((regionSpanClass) =>
       repeatRegionSpanClassesAcrossRange(visibleWindow, regionSpanClass),
     )
-    .map((span) => ({ ...span }))
     .sort(compareSpans);
 }
 
@@ -193,22 +282,30 @@ function compareSpans(left: Span, right: Span): number {
   return left.start - right.start || left.end - right.end;
 }
 
+function getSpanMidpoint(span: Span): number {
+  return (span.start + span.end) / 2;
+}
+
 function connectProjectedSlots(
   currentSlot: BuiltProjectedSlot,
   nextSlot: BuiltProjectedSlot,
+  octaveDisplacement: number,
 ): void {
   const nextOffset = getRelativeJoinOffset(
     currentSlot.spanClass,
     nextSlot.spanClass,
+    octaveDisplacement,
   );
   const prevOffset = getRelativeJoinOffset(
     nextSlot.spanClass,
     currentSlot.spanClass,
+    -octaveDisplacement,
   );
 
   currentSlot.spans.forEach((span) => {
     span.next = applyRelativeSpanOffset(span, nextOffset);
   });
+
   nextSlot.spans.forEach((span) => {
     span.prev = applyRelativeSpanOffset(span, prevOffset);
   });
@@ -217,20 +314,80 @@ function connectProjectedSlots(
 function getRelativeJoinOffset(
   source: RegionSpanClass,
   target: RegionSpanClass,
+  octaveDisplacement: number,
 ): RelativeSpanOffset {
+  const shiftedTarget = shiftSpan(target, octaveDisplacement);
+
   return {
-    end: getSignedPitchClassOffset(source.end, target.end),
-    start: getSignedPitchClassOffset(source.start, target.start),
+    end: shiftedTarget.end - source.end,
+    start: shiftedTarget.start - source.start,
   };
 }
 
-function getSignedPitchClassOffset(
-  sourcePitchClass: PitchClass,
-  targetPitchClass: PitchClass,
+function getSharedOctaveDisplacement(
+  slotPairs: [OrderedSlotPair, OrderedSlotPair],
 ): number {
-  const offset = mod(targetPitchClass - sourcePitchClass, 12);
+  return [-12, 0, 12].reduce<number | undefined>((best, displacement) => {
+    const score = getSharedOctaveDisplacementScore(slotPairs, displacement);
 
-  return offset > 6 ? offset - 12 : offset;
+    if (best === undefined) {
+      return displacement;
+    }
+
+    const bestScore = getSharedOctaveDisplacementScore(slotPairs, best);
+
+    if (score > bestScore) {
+      return displacement;
+    }
+
+    if (score < bestScore) {
+      return best;
+    }
+
+    return Math.min(best, displacement);
+  }, undefined)!;
+}
+
+function getSharedOctaveDisplacementScore(
+  slotPairs: [OrderedSlotPair, OrderedSlotPair],
+  displacement: number,
+): number {
+  return slotPairs.reduce(
+    (sum, { currentSlot, nextSlot, nextSlotNormalizationOffset }) =>
+      sum +
+      getSpanActualPitchOverlap(
+        currentSlot.spanClass,
+        shiftSpan(
+          nextSlot.spanClass,
+          nextSlotNormalizationOffset + displacement,
+        ),
+      ),
+    0,
+  );
+}
+
+function getSpanActualPitchOverlap(left: Span, right: Span): number {
+  const leftPitches = new Set(getSpanActualPitches(left));
+
+  return getSpanActualPitches(right).filter((pitch) => leftPitches.has(pitch))
+    .length;
+}
+
+function getSpanActualPitches(span: Span): number[] {
+  const pitches: number[] = [];
+
+  for (let pitch = span.start; pitch <= span.end; pitch += 2) {
+    pitches.push(pitch);
+  }
+
+  return pitches;
+}
+
+function shiftSpan(span: Span, displacement: number): Span {
+  return {
+    end: span.end + displacement,
+    start: span.start + displacement,
+  };
 }
 
 function applyRelativeSpanOffset(span: Span, offset: RelativeSpanOffset): Span {

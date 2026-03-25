@@ -8,8 +8,17 @@ import {
   type RenderSegmentLayout,
   type RenderSystemLayout,
 } from "./layout";
-import { SEGMENT_SEAM_PX, VERTICAL_PADDING_PX } from "./metrics";
-import { appendProjectedSegmentRegions } from "./regions";
+import {
+  BAR_NUMBER_GAP_PX,
+  BAR_NUMBER_FONT_SIZE_PX,
+  INK_COLOR,
+  SEGMENT_SEAM_PX,
+} from "./metrics";
+import {
+  appendProjectedSegmentRegions,
+  getProjectedRegionsVerticalBounds,
+  type VerticalBounds,
+} from "./regions";
 import { createSvgElement, setAttributes } from "./svg";
 
 type RenderSystemLayerGroups = {
@@ -28,24 +37,27 @@ const RENDER_SYSTEM_PAINT_ORDER: (keyof RenderSystemLayerGroups)[] = [
 
 function appendSegmentForeground(
   layerGroups: RenderSystemLayerGroups,
-  layout: NotationLayout,
+  maxPitch: number,
+  seamBounds: VerticalBounds,
   renderSegmentLayout: RenderSegmentLayout,
 ): void {
   const label = createSvgElement("text");
   const { segment, x } = renderSegmentLayout;
+  const seamX = x;
 
   appendProjectedSegmentEvents(
     layerGroups.fillGroup,
     layerGroups.foregroundGroup,
-    layout.maxPitch,
+    maxPitch,
     renderSegmentLayout,
   );
 
   setAttributes(label, {
-    fill: "#111111",
-    "font-size": 12,
-    x,
-    y: VERTICAL_PADDING_PX - 10,
+    fill: INK_COLOR,
+    "font-size": BAR_NUMBER_FONT_SIZE_PX,
+    "text-anchor": "middle",
+    x: seamX,
+    y: seamBounds.y - BAR_NUMBER_GAP_PX,
   });
   label.textContent = String(segment.index + 1);
 
@@ -54,17 +66,17 @@ function appendSegmentForeground(
 
 function appendSegmentBoundarySeam(
   group: SVGGElement,
-  layout: NotationLayout,
+  seamBounds: VerticalBounds,
   seamX: number,
 ): void {
   const rect = createSvgElement("rect");
 
   setAttributes(rect, {
-    fill: "#ffffff",
-    height: layout.height,
+    fill: INK_COLOR,
+    height: seamBounds.height,
     width: SEGMENT_SEAM_PX,
     x: seamX - SEGMENT_SEAM_PX / 2,
-    y: 0,
+    y: seamBounds.y,
   });
 
   group.append(rect);
@@ -72,11 +84,11 @@ function appendSegmentBoundarySeam(
 
 function appendAllSegmentSeams(
   group: SVGGElement,
-  layout: NotationLayout,
+  seamBounds: VerticalBounds,
   renderSegmentLayouts: RenderSegmentLayout[],
 ): void {
   getSeamXs(renderSegmentLayouts).forEach((seamX) => {
-    appendSegmentBoundarySeam(group, layout, seamX);
+    appendSegmentBoundarySeam(group, seamBounds, seamX);
   });
 }
 
@@ -94,6 +106,10 @@ function buildRenderSystemLayerGroups(
   renderSystemLayout: RenderSystemLayout,
 ): RenderSystemLayerGroups {
   const layerGroups = createRenderSystemLayerGroups();
+  const seamBounds = getProjectedRegionsVerticalBounds(
+    layout.maxPitch,
+    renderSystemLayout.segmentLayouts,
+  ) ?? { height: layout.height, y: 0 };
 
   renderSystemLayout.segmentLayouts.forEach((renderSegmentLayout) => {
     const group = createSvgElement("g");
@@ -103,12 +119,17 @@ function buildRenderSystemLayerGroups(
 
   appendAllSegmentSeams(
     layerGroups.seamGroup,
-    layout,
+    seamBounds,
     renderSystemLayout.segmentLayouts,
   );
 
   renderSystemLayout.segmentLayouts.forEach((renderSegmentLayout) => {
-    appendSegmentForeground(layerGroups, layout, renderSegmentLayout);
+    appendSegmentForeground(
+      layerGroups,
+      layout.maxPitch,
+      seamBounds,
+      renderSegmentLayout,
+    );
   });
 
   return layerGroups;

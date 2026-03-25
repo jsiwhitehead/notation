@@ -15,8 +15,8 @@ import {
   CENTER_SPAN_NOTCH_HALF_WIDTH_PX,
   GROUNDING_MARK_HEIGHT_PX,
   GROUNDING_MARK_WIDTH_PX,
-  getYForPitch,
   JOIN_CURVE_CONTROL_X_RATIO,
+  getYForPitch,
   PITCH_STEP_HEIGHT_PX,
   SEGMENT_GAP_PX,
   SINGLE_PITCH_SPAN_HEIGHT_PX,
@@ -80,14 +80,19 @@ const HARMONIC_WHEEL_24_DARK = [
   "#df194a",
 ] as const;
 
+type Point = {
+  x: number;
+  y: number;
+};
+
 type SpanRect = {
   bottom: number;
   height: number;
   top: number;
 };
 
-type Point = {
-  x: number;
+export type VerticalBounds = {
+  height: number;
   y: number;
 };
 
@@ -170,10 +175,79 @@ type PitchedRenderEvent = RenderSegmentLayout["segment"]["events"][number] & {
   x: number;
 };
 
+function getSpanRect(maxPitch: number, span: Span): SpanRect {
+  if (span.start === span.end) {
+    const centerY = getYForPitch(maxPitch, span.start);
+    const halfHeight = SINGLE_PITCH_SPAN_HEIGHT_PX / 2;
+
+    return {
+      bottom: centerY + halfHeight,
+      height: SINGLE_PITCH_SPAN_HEIGHT_PX,
+      top: centerY - halfHeight,
+    };
+  }
+
+  const top = getYForPitch(maxPitch, span.end) + SPAN_EVENT_CLEARANCE_PX;
+  const bottom = getYForPitch(maxPitch, span.start) - SPAN_EVENT_CLEARANCE_PX;
+
+  return {
+    bottom,
+    height: bottom - top,
+    top,
+  };
+}
+
+function getSpanVerticalBounds(maxPitch: number, span: Span): VerticalBounds {
+  const rect = getSpanRect(maxPitch, span);
+
+  return {
+    height: rect.height,
+    y: rect.top,
+  };
+}
+
+function getCombinedVerticalBounds(
+  bounds: VerticalBounds[],
+): VerticalBounds | undefined {
+  if (bounds.length === 0) {
+    return undefined;
+  }
+
+  const top = Math.min(...bounds.map((bound) => bound.y));
+  const bottom = Math.max(...bounds.map((bound) => bound.y + bound.height));
+
+  return {
+    height: bottom - top,
+    y: top,
+  };
+}
+
+export function getProjectedRegionsVerticalBounds(
+  maxPitch: number,
+  renderSegmentLayouts: RenderSegmentLayout[],
+): { height: number; y: number } | undefined {
+  const spanBounds = renderSegmentLayouts.flatMap((renderSegmentLayout) =>
+    renderSegmentLayout.segment.harmonicSlices.flatMap((harmonicSlice) =>
+      [...harmonicSlice.center.spans, ...harmonicSlice.field.spans].map(
+        (span) => getSpanVerticalBounds(maxPitch, span),
+      ),
+    ),
+  );
+
+  return getCombinedVerticalBounds(spanBounds);
+}
+
 type SpanNotchGeometry = {
   apexX: number;
   apexY: number;
   baseY: number;
+};
+
+type HighlightStrength = "base" | "mid" | "strong";
+
+type SuppressedNotchEdges = {
+  bottom: Set<number>;
+  top: Set<number>;
 };
 
 export function regionToWheel24(
@@ -253,29 +327,6 @@ function getCenterDarkColor(centerPitchClasses: number[]): string {
   const wheelIndex = regionToWheel24(centerPitchClasses);
 
   return wheelIndex === undefined ? "#111111" : wheel24ToDarkColor(wheelIndex);
-}
-
-function getSpanRect(maxPitch: number, span: Span): SpanRect {
-  if (span.start === span.end) {
-    const centerY = getYForPitch(maxPitch, span.start);
-    const halfHeight = SINGLE_PITCH_SPAN_HEIGHT_PX / 2;
-
-    return {
-      bottom: centerY + halfHeight,
-      height: SINGLE_PITCH_SPAN_HEIGHT_PX,
-      top: centerY - halfHeight,
-    };
-  }
-
-  const top = getYForPitch(maxPitch, span.end) + SPAN_EVENT_CLEARANCE_PX;
-  const bottom = getYForPitch(maxPitch, span.start) - SPAN_EVENT_CLEARANCE_PX;
-  const height = bottom - top;
-
-  return {
-    bottom,
-    height,
-    top,
-  };
 }
 
 function isDrawableSpanRect(rect: SpanRect): boolean {
@@ -527,10 +578,41 @@ function getFieldPaint(): RegionPaint {
   };
 }
 
-function getCenterPaint(color: string): RegionPaint {
+function getCenterPaint(
+  color: string,
+  highlightStrength: HighlightStrength,
+): RegionPaint {
   return {
-    layers: [{ fill: flattenColorOverWhite(color, 0.7), opacity: 1 }],
+    layers: [
+      {
+        fill: flattenColorOverWhite(
+          color,
+          highlightStrength === "strong"
+            ? 1
+            : highlightStrength === "mid"
+              ? 0.55
+              : 0.4,
+        ),
+        opacity: 1,
+      },
+    ],
   };
+}
+
+function spanContainsPitch(span: Span, pitch: number): boolean {
+  return (
+    pitch >= span.start && pitch <= span.end && (pitch - span.start) % 2 === 0
+  );
+}
+
+function spanContainsPitchClass(span: Span, pitchClass: PitchClass): boolean {
+  for (let pitch = span.start; pitch <= span.end; pitch += 2) {
+    if (mod(pitch, 12) === pitchClass) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function appendCenterSpanNotches(
@@ -543,6 +625,7 @@ function appendCenterSpanNotches(
 ): NotchRegionGraphic[] {
   const spanRect = getSpanRect(maxPitch, projectedSpan);
   const notchGraphics: NotchRegionGraphic[] = [];
+  const suppressedNotchEdges = getSuppressedInternalNotchEdges(pitchedEvents);
 
   if (!isDrawableSpanRect(spanRect)) {
     return notchGraphics;
@@ -552,7 +635,11 @@ function appendCenterSpanNotches(
     const centerX = getRenderedEventCenterX(renderSegmentLayout, event);
 
     event.pitches.forEach((pitch) => {
-      if (pitch === projectedSpan.end && notchEdges.top) {
+      if (
+        pitch === projectedSpan.end &&
+        notchEdges.top &&
+        !suppressedNotchEdges.top.has(pitch)
+      ) {
         notchGraphics.push({
           centerX,
           clipWidth: sliceBounds.width,
@@ -563,7 +650,11 @@ function appendCenterSpanNotches(
         });
       }
 
-      if (pitch === projectedSpan.start && notchEdges.bottom) {
+      if (
+        pitch === projectedSpan.start &&
+        notchEdges.bottom &&
+        !suppressedNotchEdges.bottom.has(pitch)
+      ) {
         notchGraphics.push({
           centerX,
           clipWidth: sliceBounds.width,
@@ -577,6 +668,34 @@ function appendCenterSpanNotches(
   });
 
   return notchGraphics;
+}
+
+function getSuppressedInternalNotchEdges(
+  pitchedEvents: PitchedRenderEvent[],
+): SuppressedNotchEdges {
+  const suppressedEdges: SuppressedNotchEdges = {
+    bottom: new Set<number>(),
+    top: new Set<number>(),
+  };
+
+  pitchedEvents.forEach((event) => {
+    const sortedPitches = [...event.pitches].sort(
+      (left, right) => left - right,
+    );
+
+    sortedPitches.slice(0, -1).forEach((pitch, index) => {
+      const nextPitch = sortedPitches[index + 1]!;
+
+      if (nextPitch - pitch > 3) {
+        return;
+      }
+
+      suppressedEdges.top.add(pitch);
+      suppressedEdges.bottom.add(nextPitch);
+    });
+  });
+
+  return suppressedEdges;
 }
 
 function getCenterSpanNotchSets(spans: ProjectedSpan[]): CenterSpanNotchSets {
@@ -681,7 +800,7 @@ function buildRegionGraphics(
   renderSegmentLayout: RenderSegmentLayout,
 ): RegionGraphic[] {
   const { segment: projectedSegment } = renderSegmentLayout;
-  const fieldPaint = getFieldPaint();
+  const globalHighlightPitch = projectedSegment.globalHighlightPitch;
   const regionGraphics: RegionGraphic[] = [];
 
   projectedSegment.harmonicSlices.forEach((harmonicSlice) => {
@@ -690,7 +809,6 @@ function buildRegionGraphics(
     const centerDarkColor = getCenterDarkColor(
       harmonicSlice.harmonic.center.pitchClasses,
     );
-    const centerPaint = getCenterPaint(centerColor);
     const {
       nextJoinGapPx,
       notchSets,
@@ -707,17 +825,29 @@ function buildRegionGraphics(
       regionGraphics.push({
         bounds: sliceBounds,
         nextJoinGapPx,
-        paint: fieldPaint,
+        paint: getFieldPaint(),
         prevJoinGapPx,
         projectedSpan,
         type: "span",
       });
     });
     harmonicSlice.center.spans.forEach((projectedSpan) => {
+      const highlightStrength: HighlightStrength =
+        globalHighlightPitch === undefined
+          ? "base"
+          : spanContainsPitch(projectedSpan, globalHighlightPitch)
+            ? "strong"
+            : spanContainsPitchClass(
+                  projectedSpan,
+                  mod(globalHighlightPitch, 12),
+                )
+              ? "mid"
+              : "base";
+
       regionGraphics.push({
         bounds: sliceBounds,
         nextJoinGapPx,
-        paint: centerPaint,
+        paint: getCenterPaint(centerColor, highlightStrength),
         prevJoinGapPx,
         projectedSpan,
         type: "span",

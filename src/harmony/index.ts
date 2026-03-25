@@ -367,10 +367,7 @@ function analyzeSegmentSlices(
         splitCandidate.rightHarmonic.center.pitchClasses,
       );
 
-    if (
-      bestSplitCandidate === undefined ||
-      score >= bestSplitCandidate.score
-    ) {
+    if (bestSplitCandidate === undefined || score >= bestSplitCandidate.score) {
       bestSplitCandidate = {
         score,
         slices: splitSlices,

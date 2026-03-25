@@ -11,11 +11,7 @@ import {
   type StemDirection,
 } from "./beams";
 import { getDurationDotCount, getShortDurationBeamCount } from "./duration";
-import {
-  getYForPitch,
-  NOTEHEAD_HEIGHT_PX,
-  PITCH_STEP_HEIGHT_PX,
-} from "./metrics";
+import { getYForPitch, PITCH_STEP_HEIGHT_PX, staffSpacesToPx } from "./metrics";
 import { createSvgElement, setAttributes } from "./svg";
 import {
   getAnchor,
@@ -198,9 +194,7 @@ const FLAG_64TH_DOWN = getRenderGlyph("flag64thDown");
 const FLAG_8TH_UP = getRenderGlyph("flag8thUp");
 const FLAG_8TH_DOWN = getRenderGlyph("flag8thDown");
 const AUGMENTATION_DOT = getRenderGlyph("augmentationDot");
-const PX_PER_STAFF_SPACE =
-  NOTEHEAD_HEIGHT_PX / NOTEHEAD_BLACK.heightStaffSpaces;
-const MUSIC_GLYPH_FONT_SIZE_PX = PX_PER_STAFF_SPACE * 4;
+const MUSIC_GLYPH_FONT_SIZE_PX = staffSpacesToPx(4);
 const STEM_THICKNESS_STAFF_SPACES = getEngravingDefaults().stemThickness;
 
 const DURATION_APPEARANCES: DurationAppearance[] = [
@@ -247,10 +241,6 @@ const DURATION_APPEARANCES: DurationAppearance[] = [
     threshold: 0,
   },
 ];
-
-function staffSpacesToPx(value: number): number {
-  return value * PX_PER_STAFF_SPACE;
-}
 
 function isDurationAtLeast(duration: number, threshold: number): boolean {
   return duration + DURATION_EPSILON >= threshold;
@@ -542,7 +532,7 @@ function shapePitchedEvent(
     const overlapsPrevious =
       previousNotehead !== undefined &&
       (pitch - previousNotehead.pitch) * PITCH_STEP_HEIGHT_PX <
-        noteheadGlyph.heightStaffSpaces * PX_PER_STAFF_SPACE;
+        staffSpacesToPx(noteheadGlyph.heightStaffSpaces);
 
     noteheads.push({
       centerOffsetStaffSpaces: overlapsPrevious

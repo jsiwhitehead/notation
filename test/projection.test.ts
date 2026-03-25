@@ -67,6 +67,21 @@ function region(pitchClasses: number[]) {
   return buildRegion(pitchClasses);
 }
 
+function projectedSpan(
+  start: number,
+  end: number,
+  options: {
+    next?: { end: number; start: number };
+    prev?: { end: number; start: number };
+  } = {},
+) {
+  return {
+    ...options,
+    end,
+    start,
+  };
+}
+
 function buildUnsplitHarmonicStructure(
   input: PieceInput,
   segments: HarmonicSegment[],
@@ -399,12 +414,12 @@ describe("projection", () => {
     const projection = buildProjection(input, harmonicStructure);
 
     expect(projection.segments[0]?.harmonicSlices[0]?.center.spans).toEqual([
-      { end: 52, start: 50 },
-      { end: 61, start: 53 },
-      { end: 64, start: 62 },
-      { end: 73, start: 65 },
-      { end: 76, start: 74 },
-      { end: 85, start: 77 },
+      projectedSpan(50, 52, {}),
+      projectedSpan(53, 61, {}),
+      projectedSpan(62, 64, {}),
+      projectedSpan(65, 73, {}),
+      projectedSpan(74, 76, {}),
+      projectedSpan(77, 85, {}),
     ]);
   });
 
@@ -416,10 +431,10 @@ describe("projection", () => {
     const projection = buildProjection(input, harmonicStructure);
 
     expect(projection.segments[0]?.harmonicSlices[0]?.center.spans).toEqual([
-      { end: 61, start: 53 },
-      { end: 64, start: 62 },
-      { end: 73, start: 65 },
-      { end: 76, start: 74 },
+      projectedSpan(53, 61, {}),
+      projectedSpan(62, 64, {}),
+      projectedSpan(65, 73, {}),
+      projectedSpan(74, 76, {}),
     ]);
   });
 
@@ -437,18 +452,12 @@ describe("projection", () => {
     expect(projection.segments[0]?.harmonicSlices).toEqual([
       {
         center: {
-          spans: [
-            { end: 64, next: { end: 65, start: 61 }, start: 60 },
-            { end: 69, next: { end: 70, start: 68 }, start: 67 },
-          ],
+          spans: [projectedSpan(60, 64, {}), projectedSpan(67, 69, {})],
         },
         duration: 2,
         endX: 0.7445208382054341,
         field: {
-          spans: [
-            { end: 64, next: { end: 65, start: 61 }, start: 60 },
-            { end: 69, next: { end: 70, start: 68 }, start: 67 },
-          ],
+          spans: [projectedSpan(60, 64, {}), projectedSpan(67, 69, {})],
         },
         harmonic: {
           center: region([0, 7, 2, 9, 4]),
@@ -463,18 +472,18 @@ describe("projection", () => {
       {
         center: {
           spans: [
-            { end: 58, prev: { end: 57, start: 55 }, start: 56 },
-            { end: 65, prev: { end: 64, start: 60 }, start: 61 },
-            { end: 70, prev: { end: 69, start: 67 }, start: 68 },
+            projectedSpan(56, 58, {}),
+            projectedSpan(61, 65, {}),
+            projectedSpan(68, 70, {}),
           ],
         },
         duration: 2,
         endX: 1,
         field: {
           spans: [
-            { end: 58, prev: { end: 57, start: 55 }, start: 56 },
-            { end: 65, prev: { end: 64, start: 60 }, start: 61 },
-            { end: 70, prev: { end: 69, start: 67 }, start: 68 },
+            projectedSpan(56, 58, {}),
+            projectedSpan(61, 65, {}),
+            projectedSpan(68, 70, {}),
           ],
         },
         harmonic: {
@@ -565,11 +574,11 @@ describe("projection", () => {
     );
 
     expect(projection.segments[0]?.harmonicSlices[0]?.center.spans).toEqual([
-      { end: 60, start: 60 },
-      { end: 61, start: 61 },
+      projectedSpan(60, 60, {}),
+      projectedSpan(61, 61, {}),
     ]);
     expect(projection.segments[0]?.harmonicSlices[0]?.field.spans).toEqual([
-      { end: 59, start: 59 },
+      projectedSpan(59, 59, {}),
     ]);
   });
 
@@ -629,17 +638,17 @@ describe("projection", () => {
         {
           center: {
             spans: [
-              { end: 60, start: 60 },
-              { end: 64, start: 64 },
-              { end: 67, start: 67 },
+              projectedSpan(60, 60, {}),
+              projectedSpan(64, 64, {}),
+              projectedSpan(67, 67, {}),
             ],
           },
           duration: 1,
           field: {
             spans: [
-              { end: 60, start: 60 },
-              { end: 64, start: 64 },
-              { end: 67, start: 67 },
+              projectedSpan(60, 60, {}),
+              projectedSpan(64, 64, {}),
+              projectedSpan(67, 67, {}),
             ],
           },
           harmonic: {
@@ -924,14 +933,14 @@ describe("projection", () => {
     );
 
     expect(projection.segments[0]?.harmonicSlices[0]?.center.spans).toEqual([
-      { end: 62, next: { end: 64, start: 62 }, start: 60 },
-      { end: 69, next: { end: 71, start: 69 }, start: 67 },
-      { end: 74, next: { end: 76, start: 74 }, start: 72 },
+      projectedSpan(60, 62, { next: { end: 64, start: 62 } }),
+      projectedSpan(67, 69, { next: { end: 71, start: 69 } }),
+      projectedSpan(72, 74, { next: { end: 76, start: 74 } }),
     ]);
     expect(projection.segments[1]?.harmonicSlices[0]?.center.spans).toEqual([
-      { end: 59, prev: { end: 57, start: 55 }, start: 57 },
-      { end: 64, prev: { end: 62, start: 60 }, start: 62 },
-      { end: 71, prev: { end: 69, start: 67 }, start: 69 },
+      projectedSpan(57, 59, { prev: { end: 57, start: 55 } }),
+      projectedSpan(62, 64, { prev: { end: 62, start: 60 } }),
+      projectedSpan(69, 71, { prev: { end: 69, start: 67 } }),
     ]);
   });
 
@@ -972,16 +981,16 @@ describe("projection", () => {
     );
 
     expect(projection.segments[0]?.harmonicSlices[0]?.center.spans).toEqual([
-      { end: 59, next: { end: 61, start: 53 }, start: 53 },
-      { end: 64, next: { end: 64, start: 62 }, start: 60 },
-      { end: 71, next: { end: 73, start: 65 }, start: 65 },
-      { end: 76, next: { end: 76, start: 74 }, start: 72 },
+      projectedSpan(53, 59, { next: { end: 61, start: 53 } }),
+      projectedSpan(60, 64, { next: { end: 64, start: 62 } }),
+      projectedSpan(65, 71, { next: { end: 73, start: 65 } }),
+      projectedSpan(72, 76, { next: { end: 76, start: 74 } }),
     ]);
     expect(projection.segments[1]?.harmonicSlices[0]?.center.spans).toEqual([
-      { end: 61, prev: { end: 59, start: 53 }, start: 53 },
-      { end: 64, prev: { end: 64, start: 60 }, start: 62 },
-      { end: 73, prev: { end: 71, start: 65 }, start: 65 },
-      { end: 76, prev: { end: 76, start: 72 }, start: 74 },
+      projectedSpan(53, 61, { prev: { end: 59, start: 53 } }),
+      projectedSpan(62, 64, { prev: { end: 64, start: 60 } }),
+      projectedSpan(65, 73, { prev: { end: 71, start: 65 } }),
+      projectedSpan(74, 76, { prev: { end: 76, start: 72 } }),
     ]);
   });
 
@@ -1006,12 +1015,12 @@ describe("projection", () => {
     );
 
     expect(projection.segments[0]?.harmonicSlices[0]?.center.spans).toEqual([
-      { end: 60, start: 60 },
-      { end: 61, next: { end: 61, start: 61 }, start: 61 },
+      projectedSpan(60, 60, { next: { end: 50, start: 50 } }),
+      projectedSpan(61, 61, { next: { end: 61, start: 61 } }),
     ]);
     expect(projection.segments[1]?.harmonicSlices[0]?.center.spans).toEqual([
-      { end: 61, prev: { end: 61, start: 61 }, start: 61 },
-      { end: 62, start: 62 },
+      projectedSpan(61, 61, { prev: { end: 61, start: 61 } }),
+      projectedSpan(62, 62, { prev: { end: 72, start: 72 } }),
     ]);
   });
 
@@ -1040,14 +1049,14 @@ describe("projection", () => {
     );
 
     expect(projection.segments[0]?.harmonicSlices[0]?.center.spans).toEqual([
-      { end: 60, start: 60 },
-      { end: 61, start: 61 },
-      { end: 62, start: 62 },
+      projectedSpan(60, 60, {}),
+      projectedSpan(61, 61, {}),
+      projectedSpan(62, 62, {}),
     ]);
     expect(projection.segments[1]?.harmonicSlices[0]?.center.spans).toEqual([
-      { end: 61, start: 61 },
-      { end: 62, start: 62 },
-      { end: 63, start: 63 },
+      projectedSpan(61, 61, {}),
+      projectedSpan(62, 62, {}),
+      projectedSpan(63, 63, {}),
     ]);
   });
 

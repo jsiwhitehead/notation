@@ -59,6 +59,21 @@ function region(pitchClasses: number[]) {
   return buildRegion(pitchClasses);
 }
 
+function projectedSpan(
+  start: number,
+  end: number,
+  options: {
+    next?: { end: number; start: number };
+    prev?: { end: number; start: number };
+  } = {},
+) {
+  return {
+    ...options,
+    end,
+    start,
+  };
+}
+
 function createBaseLayout(): NotationLayout {
   return {
     height: 300,
@@ -246,7 +261,7 @@ describe("appendProjectedSegmentRegions", () => {
         harmonicSlices: [
           {
             center: {
-              spans: [{ end: 62, start: 62 }],
+              spans: [projectedSpan(62, 62)],
             },
             duration: 1,
             endX: 1,
@@ -274,8 +289,8 @@ describe("appendProjectedSegmentRegions", () => {
     const coloredPaths = getUniqueNonWhitePathData(group);
 
     expect(coloredPaths).toHaveLength(1);
-    expect(coloredPaths[0]).toContain("129.5");
-    expect(coloredPaths[0]).toContain("130.5");
+    expect(coloredPaths[0]).toContain("129.25");
+    expect(coloredPaths[0]).toContain("130.75");
   });
 
   test("positions notches from segment-space event x coordinates", () => {
@@ -295,10 +310,7 @@ describe("appendProjectedSegmentRegions", () => {
         harmonicSlices: [
           {
             center: {
-              spans: [
-                { end: 62, start: 60 },
-                { end: 63, start: 63 },
-              ],
+              spans: [projectedSpan(60, 62), projectedSpan(63, 63, {})],
             },
             duration: 1,
             endX: 1,
@@ -359,10 +371,7 @@ describe("appendProjectedSegmentRegions", () => {
         harmonicSlices: [
           {
             center: {
-              spans: [
-                { end: 62, start: 60 },
-                { end: 63, start: 63 },
-              ],
+              spans: [projectedSpan(60, 62), projectedSpan(63, 63, {})],
             },
             duration: 1,
             endX: 1,
@@ -403,12 +412,12 @@ describe("appendProjectedSegmentRegions", () => {
         harmonicSlices: [
           {
             center: {
-              spans: [{ end: 62, next: { end: 64, start: 62 }, start: 60 }],
+              spans: [projectedSpan(60, 62, { next: { end: 64, start: 62 } })],
             },
             duration: 1,
             endX: 0.5,
             field: {
-              spans: [{ end: 62, next: { end: 64, start: 62 }, start: 60 }],
+              spans: [projectedSpan(60, 62, { next: { end: 64, start: 62 } })],
             },
             harmonic: {
               center: region([0, 2]),
@@ -422,12 +431,12 @@ describe("appendProjectedSegmentRegions", () => {
           },
           {
             center: {
-              spans: [{ end: 64, prev: { end: 62, start: 60 }, start: 62 }],
+              spans: [projectedSpan(62, 64, { prev: { end: 62, start: 60 } })],
             },
             duration: 1,
             endX: 1,
             field: {
-              spans: [{ end: 64, prev: { end: 62, start: 60 }, start: 62 }],
+              spans: [projectedSpan(62, 64, { prev: { end: 62, start: 60 } })],
             },
             harmonic: {
               center: region([0, 2]),
