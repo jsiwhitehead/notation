@@ -10,6 +10,10 @@ import type {
   PieceInput,
 } from "../src/model";
 
+function chordSymbolsAtStart(symbol: string) {
+  return [{ offset: 0, symbol }];
+}
+
 const WRAPPED_REGION_FIXTURE: PieceInput = {
   segments: [
     {
@@ -17,14 +21,14 @@ const WRAPPED_REGION_FIXTURE: PieceInput = {
         { duration: 1, type: "rest" },
         { duration: 2, pitches: [62, 65, 69], type: "chord" },
       ],
-      chordSymbol: "Dmin7",
+      chordSymbols: chordSymbolsAtStart("Dmin7"),
     },
     {
       events: [
         { duration: 2, type: "rest" },
         { duration: 1, pitch: 67, type: "note" },
       ],
-      chordSymbol: "G7",
+      chordSymbols: chordSymbolsAtStart("G7"),
     },
     {
       events: [
@@ -35,7 +39,7 @@ const WRAPPED_REGION_FIXTURE: PieceInput = {
         { duration: 0.5, pitches: [64, 67, 71], type: "chord" },
         { duration: 0.5, pitch: 72, type: "note" },
       ],
-      chordSymbol: "Cmaj7",
+      chordSymbols: chordSymbolsAtStart("Cmaj7"),
     },
     {
       events: [
@@ -53,7 +57,7 @@ const WRAPPED_REGION_FIXTURE: PieceInput = {
         { duration: 0.125, pitch: 72, type: "note" },
         { duration: 0.0625, type: "rest" },
       ],
-      chordSymbol: "Amin7",
+      chordSymbols: chordSymbolsAtStart("Amin7"),
     },
   ],
 };
@@ -683,6 +687,36 @@ describe("projection", () => {
           { fieldSpan: { end: 67, start: 67 }, pitch: 67 },
         ],
         pitches: [60, 64, 67],
+        type: "pitched",
+        x: 0.5,
+      },
+    ]);
+  });
+
+  test("buildProjection leaves chromatic pitches inside a field range unowned when they fall off the tone lattice", () => {
+    const projection = buildProjectionWithUnsplitHarmonic(
+      {
+        segments: [
+          {
+            events: [{ duration: 1, pitch: 61, type: "note" }],
+          },
+        ],
+      },
+      [
+        {
+          center: region([0, 2, 4]),
+          field: region([0, 2, 4]),
+        },
+      ],
+    );
+
+    expect(projection.segments[0]?.events).toEqual([
+      {
+        duration: 1,
+        layer: 0,
+        offset: 0,
+        pitchOwnerships: [{ pitch: 61 }],
+        pitches: [61],
         type: "pitched",
         x: 0.5,
       },

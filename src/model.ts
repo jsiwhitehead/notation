@@ -2,6 +2,10 @@ export type PitchClass = number;
 export type EventLayer = number;
 export type EventOffset = number;
 export type ChordSymbol = string;
+export type TimedChordSymbol = {
+  offset: EventOffset;
+  symbol: ChordSymbol;
+};
 
 type BaseEvent = {
   duration: number;
@@ -31,7 +35,7 @@ export type TimeSignature = {
 };
 
 export type SegmentInput = {
-  chordSymbol?: ChordSymbol;
+  chordSymbols?: TimedChordSymbol[];
   events: EventInput[];
   timeSignature?: TimeSignature;
 };

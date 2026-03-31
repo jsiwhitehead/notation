@@ -393,7 +393,12 @@ function getOwningFieldSpan(
   pitch: number,
 ): ProjectedSpan | undefined {
   return spans
-    .filter((span) => span.start <= pitch && pitch <= span.end)
+    .filter(
+      (span) =>
+        span.start <= pitch &&
+        pitch <= span.end &&
+        (pitch - span.start) % 2 === 0,
+    )
     .sort(
       (left, right) =>
         left.end - left.start - (right.end - right.start) ||

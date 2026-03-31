@@ -16,6 +16,10 @@ import {
   wheel24ToDarkColor,
 } from "../src/render/regions";
 import type { NotationLayout, RenderSegmentLayout } from "../src/render/layout";
+import {
+  OUT_OF_FIELD_MARK_STROKE_WIDTH_PX,
+  OUT_OF_FIELD_MARK_WIDTH_PX,
+} from "../src/render/metrics";
 
 beforeAll(() => {
   GlobalRegistrator.register();
@@ -26,13 +30,19 @@ function getPitchedEvent(options: {
   layer?: number;
   offset: number;
   pitches?: number[];
+  pitchOwnerships?: Array<{
+    fieldSpan?: { end: number; start: number };
+    pitch: number;
+  }>;
   x?: number;
 }): ProjectionEvent {
   return {
     duration: options.duration,
     layer: options.layer ?? 0,
     offset: options.offset,
-    pitchOwnerships: (options.pitches ?? [60]).map((pitch) => ({ pitch })),
+    pitchOwnerships:
+      options.pitchOwnerships ??
+      (options.pitches ?? [60]).map((pitch) => ({ pitch })),
     pitches: options.pitches ?? [60],
     type: "pitched",
     x: options.x ?? 0.5,
@@ -173,6 +183,14 @@ function getTranslateX(transform: string): number {
   }
 
   return Number(match[1]);
+}
+
+function getOutOfFieldLines(group: SVGGElement): SVGLineElement[] {
+  return [...group.querySelectorAll("line")].filter(
+    (line) =>
+      line.getAttribute("y1") === line.getAttribute("y2") &&
+      Number(line.getAttribute("stroke-width")) === OUT_OF_FIELD_MARK_STROKE_WIDTH_PX,
+  );
 }
 
 describe("render duration policy", () => {
@@ -475,6 +493,51 @@ describe("appendProjectedSegmentRegions", () => {
       ),
     ).toBe(true);
   });
+
+  test("renders ground marks at half the width of root marks", () => {
+    const group = renderSegmentRegions(
+      createRenderSegmentLayout({
+        events: [],
+        harmonicSlices: [
+          {
+            center: { spans: [] },
+            duration: 1,
+            endX: 1,
+            field: { spans: [] },
+            harmonic: {
+              center: region([0, 7]),
+              field: region([0, 7]),
+              grounding: { ground: 7, root: 0 },
+            },
+            projectedGroundingMarks: {
+              groundPitchClass: 7,
+              marks: [
+                { pitch: 60, type: "root" },
+                { pitch: 67, type: "ground" },
+              ],
+              rootPitchClass: 0,
+            },
+            startOffset: 0,
+            startX: 0,
+            touchesSegmentEnd: true,
+            touchesSegmentStart: true,
+          },
+        ],
+        index: 0,
+        visibleDefaults: { restAnchorPitch: 60 },
+        segmentWidthUnits: 25,
+        timePositions: [],
+        timeSignature: undefined,
+        totalDuration: 1,
+      }),
+    );
+
+    const widths = [...group.querySelectorAll("rect")].map((rect) =>
+      Number(rect.getAttribute("width")),
+    );
+
+    expect(widths).toEqual([10, 5]);
+  });
 });
 
 describe("appendProjectedSegmentEvents", () => {
@@ -665,6 +728,53 @@ describe("appendProjectedSegmentEvents", () => {
 
     expect(secondOriginX).toBeGreaterThan(firstOriginX! + 5);
     expect(firstOriginX!).toBeGreaterThan(233);
+  });
+
+  test("draws a short horizontal mark through noteheads outside the field", () => {
+    const { fillGroup } = renderSegmentEvents(
+      createRenderSegmentLayout({
+        events: [
+          getPitchedEvent({
+            duration: 1,
+            offset: 0,
+            pitches: [61],
+            pitchOwnerships: [{ pitch: 61 }],
+          }),
+        ],
+        harmonicSlices: [
+          {
+            center: { spans: [] },
+            duration: 1,
+            endX: 1,
+            field: { spans: [] },
+            harmonic: {
+              center: region([]),
+              field: region([]),
+            },
+            projectedGroundingMarks: undefined,
+            startOffset: 0,
+            startX: 0,
+            touchesSegmentEnd: true,
+            touchesSegmentStart: true,
+          },
+        ],
+        index: 0,
+        visibleDefaults: { restAnchorPitch: 60 },
+        segmentWidthUnits: 25,
+        timePositions: [{ maxDuration: 1, offset: 0, x: 0.5 }],
+        timeSignature: undefined,
+        totalDuration: 1,
+      }),
+    );
+
+    const outOfFieldLines = getOutOfFieldLines(fillGroup);
+
+    expect(outOfFieldLines).toHaveLength(1);
+    expect(fillGroup.contains(outOfFieldLines[0]!)).toBe(true);
+    expect(
+      Number(outOfFieldLines[0]?.getAttribute("x2")) -
+        Number(outOfFieldLines[0]?.getAttribute("x1")),
+    ).toBeCloseTo(OUT_OF_FIELD_MARK_WIDTH_PX, 6);
   });
 });
 

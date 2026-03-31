@@ -24,6 +24,7 @@ import type {
   PitchClass,
   PieceInput,
   SegmentInput,
+  TimedChordSymbol,
 } from "../model";
 
 const MIN_SETTLED_REGION_EVIDENCE = 3;
@@ -33,11 +34,16 @@ const SPLIT_DIVERGENCE_WEIGHT = 0.2;
 const SPLIT_CENTER_COMPACTNESS_WEIGHT = 0.1;
 
 type SegmentEvidence = {
-  eventPitchClassWeightByPitchClass: Map<PitchClass, number>;
-  eventPitchClasses: PitchClass[];
+  pitchClassWeightByPitchClass: Map<PitchClass, number>;
   chordGroundPitchClass?: PitchClass;
   chordRootPitchClass?: PitchClass;
   localPitchClasses: PitchClass[];
+};
+
+type TimedChordSymbolWindow = {
+  duration: number;
+  offset: EventOffset;
+  symbol: string;
 };
 
 type SegmentationCandidate = {
@@ -92,34 +98,19 @@ function getOmittedWeight(
 }
 
 function collectSegmentEvidence(segment: SegmentInput): SegmentEvidence {
+  const activeChordSymbol = getUnambiguousSegmentGroundingSymbol(segment);
   const normalizedChordSymbol =
-    segment.chordSymbol === undefined
+    activeChordSymbol === undefined
       ? undefined
-      : normalizeChordSymbol(segment.chordSymbol);
-  const eventPitchClassWeightByPitchClass = new Map<PitchClass, number>();
+      : normalizeChordSymbol(activeChordSymbol);
+  const pitchClassWeightByPitchClass = getPitchClassWeightByPitchClass(segment);
 
-  segment.events.forEach((event) => {
-    getEventPitchClasses(event).forEach((pitchClass) => {
-      addPitchClassWeight(
-        eventPitchClassWeightByPitchClass,
-        pitchClass,
-        event.duration,
-      );
-    });
-  });
-
-  const eventPitchClasses = uniqueSortedPitchClasses(
-    segment.events.flatMap(getEventPitchClasses),
+  const localPitchClasses = [...pitchClassWeightByPitchClass.keys()].sort(
+    (left, right) => left - right,
   );
-  const chordPitchClasses = normalizedChordSymbol?.pitchClasses ?? [];
-  const localPitchClasses = uniqueSortedPitchClasses([
-    ...eventPitchClasses,
-    ...chordPitchClasses,
-  ]);
 
   return {
-    eventPitchClassWeightByPitchClass,
-    eventPitchClasses,
+    pitchClassWeightByPitchClass,
     localPitchClasses,
     ...(normalizedChordSymbol === undefined
       ? {}
@@ -128,6 +119,96 @@ function collectSegmentEvidence(segment: SegmentInput): SegmentEvidence {
           chordRootPitchClass: normalizedChordSymbol.rootPitchClass,
         }),
   };
+}
+
+function getTimedChordSymbols(segment: SegmentInput): TimedChordSymbol[] {
+  return segment.chordSymbols ?? [];
+}
+
+function getOrderedTimedChordSymbols(segment: SegmentInput): TimedChordSymbol[] {
+  return [...getTimedChordSymbols(segment)].sort(
+    (left, right) => left.offset - right.offset,
+  );
+}
+
+function getUnambiguousSegmentGroundingSymbol(
+  segment: SegmentInput,
+): string | undefined {
+  const timedChordSymbols = getOrderedTimedChordSymbols(segment);
+
+  return timedChordSymbols.length === 1 ? timedChordSymbols[0]!.symbol : undefined;
+}
+
+function getActiveChordSymbol(
+  segment: SegmentInput,
+  offset: EventOffset = 0,
+): string | undefined {
+  return getOrderedTimedChordSymbols(segment)
+    .filter((timedChordSymbol) => timedChordSymbol.offset <= offset)
+    .at(-1)?.symbol;
+}
+
+function getTimedChordSymbolWindows(
+  segment: SegmentInput,
+  totalDuration: number,
+): TimedChordSymbolWindow[] {
+  const timedChordSymbols = getOrderedTimedChordSymbols(segment).filter(
+    (timedChordSymbol) => timedChordSymbol.offset < totalDuration,
+  );
+
+  return timedChordSymbols.flatMap((timedChordSymbol, index) => {
+    const nextOffset = timedChordSymbols[index + 1]?.offset ?? totalDuration;
+    const duration = nextOffset - timedChordSymbol.offset;
+
+    if (duration <= 0) {
+      return [];
+    }
+
+    return [
+      {
+        duration,
+        offset: timedChordSymbol.offset,
+        symbol: timedChordSymbol.symbol,
+      },
+    ];
+  });
+}
+
+function getPitchClassWeightByPitchClass(
+  segment: SegmentInput,
+): Map<PitchClass, number> {
+  const pitchClassWeightByPitchClass = new Map<PitchClass, number>();
+  const totalDuration = getSegmentTotalDuration(segment);
+
+  segment.events.forEach((event) => {
+    getEventPitchClasses(event).forEach((pitchClass) => {
+      addPitchClassWeight(
+        pitchClassWeightByPitchClass,
+        pitchClass,
+        event.duration,
+      );
+    });
+  });
+
+  getTimedChordSymbolWindows(segment, totalDuration).forEach(
+    ({ duration, symbol }) => {
+      const normalizedTimedChordSymbol = normalizeChordSymbol(symbol);
+
+      if (normalizedTimedChordSymbol === undefined) {
+        return;
+      }
+
+      normalizedTimedChordSymbol.pitchClasses.forEach((pitchClass) => {
+        addPitchClassWeight(
+          pitchClassWeightByPitchClass,
+          pitchClass,
+          duration,
+        );
+      });
+    },
+  );
+
+  return pitchClassWeightByPitchClass;
 }
 
 function getPowerSet(values: PitchClass[]): PitchClass[][] {
@@ -153,23 +234,25 @@ function isStrongRescuedCenter(
   );
 }
 
-function buildWeightedCenter(segmentEvidence: SegmentEvidence): HarmonicRegion {
-  const directCenter = buildCenterFromPitchClasses(
+function getDirectCenter(segmentEvidence: SegmentEvidence): HarmonicRegion {
+  return buildCenterFromPitchClasses(
     segmentEvidence.localPitchClasses,
-    segmentEvidence.eventPitchClasses,
+    segmentEvidence.localPitchClasses,
   );
+}
 
-  if (directCenter.pitchClasses.length > 0) {
-    return directCenter;
-  }
-
+function getRescueCandidateCenters(
+  segmentEvidence: SegmentEvidence,
+): HarmonicRegion[] {
   const candidateCenterByKey = new Map<string, HarmonicRegion>();
 
-  getPowerSet(segmentEvidence.eventPitchClasses).forEach((eventSubset) => {
-    const candidateLocalPitchClasses = uniqueSortedPitchClasses(eventSubset);
+  getPowerSet(segmentEvidence.localPitchClasses).forEach((pitchClassSubset) => {
+    const candidateLocalPitchClasses = uniqueSortedPitchClasses(
+      pitchClassSubset,
+    );
     const candidateCenter = buildCenterFromPitchClasses(
       candidateLocalPitchClasses,
-      eventSubset,
+      candidateLocalPitchClasses,
     );
 
     if (candidateCenter.pitchClasses.length === 0) {
@@ -182,32 +265,33 @@ function buildWeightedCenter(segmentEvidence: SegmentEvidence): HarmonicRegion {
     );
   });
 
-  const candidateCenters = [...candidateCenterByKey.values()];
+  return [...candidateCenterByKey.values()];
+}
 
-  if (candidateCenters.length === 0) {
-    return directCenter;
-  }
-
+function rankRescueCandidateCenters(
+  segmentEvidence: SegmentEvidence,
+  candidateCenters: HarmonicRegion[],
+): HarmonicRegion | undefined {
   const strongCandidateCenters = candidateCenters.filter((candidateCenter) =>
     isStrongRescuedCenter(
       candidateCenter,
-      segmentEvidence.eventPitchClassWeightByPitchClass,
+      segmentEvidence.pitchClassWeightByPitchClass,
     ),
   );
 
   if (strongCandidateCenters.length === 0) {
-    return directCenter;
+    return undefined;
   }
 
   return strongCandidateCenters.sort((left, right) => {
     const capturedWeightDifference =
       getCapturedWeight(
         right,
-        segmentEvidence.eventPitchClassWeightByPitchClass,
+        segmentEvidence.pitchClassWeightByPitchClass,
       ) -
       getCapturedWeight(
         left,
-        segmentEvidence.eventPitchClassWeightByPitchClass,
+        segmentEvidence.pitchClassWeightByPitchClass,
       );
 
     if (capturedWeightDifference !== 0) {
@@ -224,11 +308,26 @@ function buildWeightedCenter(segmentEvidence: SegmentEvidence): HarmonicRegion {
     return (
       getOmittedWeight(
         left,
-        segmentEvidence.eventPitchClassWeightByPitchClass,
+        segmentEvidence.pitchClassWeightByPitchClass,
       ) -
-      getOmittedWeight(right, segmentEvidence.eventPitchClassWeightByPitchClass)
+      getOmittedWeight(right, segmentEvidence.pitchClassWeightByPitchClass)
     );
   })[0]!;
+}
+
+function buildWeightedCenter(segmentEvidence: SegmentEvidence): HarmonicRegion {
+  const directCenter = getDirectCenter(segmentEvidence);
+
+  if (directCenter.pitchClasses.length > 0) {
+    return directCenter;
+  }
+
+  return (
+    rankRescueCandidateCenters(
+      segmentEvidence,
+      getRescueCandidateCenters(segmentEvidence),
+    ) ?? directCenter
+  );
 }
 
 function buildCenter(segmentEvidence: SegmentEvidence): HarmonicRegion {
@@ -330,6 +429,10 @@ function analyzeSegmentSlices(
   totalDuration: number,
   harmonic: HarmonicSegment,
 ): HarmonicSlice[] {
+  if (getTimedChordSymbols(segment).length > 0) {
+    return buildChordSymbolSlices(segment, totalDuration);
+  }
+
   const unsplitSlices = buildUnsplitSlices(totalDuration, harmonic);
   const unsplitScore = scoreSegmentation(segment, unsplitSlices);
   const splitOffsets = getCandidateSplitOffsets(segment, totalDuration);
@@ -383,6 +486,31 @@ function analyzeSegmentSlices(
   }
 
   return unsplitSlices;
+}
+
+function buildChordSymbolSlices(
+  segment: SegmentInput,
+  totalDuration: number,
+): HarmonicSlice[] {
+  const sliceOffsets = [
+    ...new Set([
+      0,
+      ...getTimedChordSymbolWindows(segment, totalDuration).map(
+        (timedChordSymbolWindow) => timedChordSymbolWindow.offset,
+      ),
+    ]),
+  ].sort((left, right) => left - right);
+
+  return sliceOffsets.map((startOffset, index) => {
+    const endOffset = sliceOffsets[index + 1] ?? totalDuration;
+    const windowedSegment = buildWindowedSegment(segment, startOffset, endOffset);
+
+    return {
+      duration: endOffset - startOffset,
+      harmonic: analyzeIsolatedSegment(windowedSegment),
+      startOffset,
+    };
+  });
 }
 
 function buildUnsplitSlices(
@@ -544,7 +672,7 @@ function scoreAnalyzedWindow(
   segment: SegmentInput,
   center: HarmonicRegion,
 ): number {
-  const weightByPitchClass = getEventPitchClassWeightByPitchClass(segment);
+  const weightByPitchClass = getPitchClassWeightByPitchClass(segment);
   const capturedWeight = getCapturedWeight(center, weightByPitchClass);
   const omittedWeight = getOmittedWeight(center, weightByPitchClass);
 
@@ -557,20 +685,6 @@ function scoreAnalyzedWindow(
     omittedWeight -
     center.pitchClasses.length * SPLIT_CENTER_COMPACTNESS_WEIGHT
   );
-}
-
-function getEventPitchClassWeightByPitchClass(
-  segment: SegmentInput,
-): Map<PitchClass, number> {
-  const weightByPitchClass = new Map<PitchClass, number>();
-
-  segment.events.forEach((event) => {
-    getEventPitchClasses(event).forEach((pitchClass) => {
-      addPitchClassWeight(weightByPitchClass, pitchClass, event.duration);
-    });
-  });
-
-  return weightByPitchClass;
 }
 
 function getCandidateSplitOffsets(
@@ -587,7 +701,32 @@ function buildWindowedSegment(
   startOffset: EventOffset,
   endOffset: EventOffset,
 ): SegmentInput {
+  const timedChordSymbols = getOrderedTimedChordSymbols(segment);
+  const inheritedChordSymbol = getActiveChordSymbol(segment, startOffset);
+  const windowChordSymbols = timedChordSymbols
+    .filter(
+      (timedChordSymbol) =>
+        timedChordSymbol.offset >= startOffset &&
+        timedChordSymbol.offset < endOffset,
+    )
+    .map((timedChordSymbol) => ({
+      offset: timedChordSymbol.offset - startOffset,
+      symbol: timedChordSymbol.symbol,
+    }));
+  const normalizedChordSymbols =
+    inheritedChordSymbol === undefined
+      ? windowChordSymbols
+      : windowChordSymbols[0]?.offset === 0 &&
+          windowChordSymbols[0]?.symbol === inheritedChordSymbol
+        ? windowChordSymbols
+        : [{ offset: 0, symbol: inheritedChordSymbol }, ...windowChordSymbols];
+
   return {
+    ...(normalizedChordSymbols.length === 0
+      ? {}
+      : {
+          chordSymbols: normalizedChordSymbols,
+        }),
     events: segment.events.flatMap((event) => {
       const eventOffset = event.offset ?? 0;
       const overlapStart = Math.max(startOffset, eventOffset);

@@ -143,6 +143,7 @@ type PositionedNotchRegionGraphic = {
 
 type GroundMarkGraphic = {
   fill: string;
+  markType: "ground" | "root";
   pitch: number;
   sliceX: number;
   type: "ground";
@@ -867,6 +868,7 @@ function buildRegionGraphics(
     harmonicSlice.projectedGroundingMarks?.marks.forEach((mark) => {
       regionGraphics.push({
         fill: centerDarkColor,
+        markType: mark.type,
         pitch: mark.pitch,
         sliceX: sliceBounds.x,
         type: "ground",
@@ -934,12 +936,16 @@ function positionRegionGraphic(
     }
     case "ground": {
       const y = getYForPitch(layout.maxPitch, regionGraphic.pitch);
+      const width =
+        regionGraphic.markType === "ground"
+          ? GROUNDING_MARK_WIDTH_PX / 2
+          : GROUNDING_MARK_WIDTH_PX;
 
       return {
         fill: regionGraphic.fill,
         height: GROUNDING_MARK_HEIGHT_PX,
         type: "ground",
-        width: GROUNDING_MARK_WIDTH_PX,
+        width,
         x: regionGraphic.sliceX - SEGMENT_GAP_PX / 2,
         y: y - GROUNDING_MARK_HEIGHT_PX / 2,
       };

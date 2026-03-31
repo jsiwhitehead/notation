@@ -5,6 +5,7 @@ import type {
   PieceInput,
   RestEvent,
   SegmentInput,
+  TimedChordSymbol,
   TimeSignature,
 } from "./model";
 
@@ -54,6 +55,13 @@ const HARMONY_KIND_TO_SUFFIX: Record<string, string> = {
   "major-seventh": "maj7",
   minor: "min",
   "minor-seventh": "min7",
+};
+const DEGREE_ACCIDENTAL_TO_TEXT: Record<number, string> = {
+  [-2]: "bb",
+  [-1]: "b",
+  0: "",
+  1: "#",
+  2: "##",
 };
 
 function appendMeasureEvent(events: MeasureEvent[], event: MeasureEvent): void {
@@ -153,6 +161,57 @@ function getDurationUnits(
   return durationValue / divisions;
 }
 
+function getDegreeSuffixes(harmonyElement: Element, baseSuffix: string): string[] {
+  return Array.from(harmonyElement.querySelectorAll("degree")).flatMap(
+    (degreeElement) => {
+      const degreeValue = Number(
+        getRequiredChildText(degreeElement, "degree-value"),
+      );
+      const degreeAlter = Number(
+        getRequiredChildText(degreeElement, "degree-alter") ?? "0",
+      );
+      const accidentalText = DEGREE_ACCIDENTAL_TO_TEXT[degreeAlter];
+
+      if (
+        !Number.isFinite(degreeValue) ||
+        !Number.isFinite(degreeAlter) ||
+        accidentalText === undefined
+      ) {
+        return [];
+      }
+
+      if (degreeAlter !== 0) {
+        return [`${accidentalText}${degreeValue}`];
+      }
+
+      if (degreeValue === 9 && /(^|[^0-9])6([^0-9]|$)/.test(baseSuffix)) {
+        return ["/9"];
+      }
+
+      return [`add${degreeValue}`];
+    },
+  );
+}
+
+function getBassSuffix(harmonyElement: Element): string {
+  const bassStep = getRequiredChildText(harmonyElement, "bass-step");
+
+  if (bassStep === undefined) {
+    return "";
+  }
+
+  const bassAlter = Number(
+    getRequiredChildText(harmonyElement, "bass-alter") ?? "0",
+  );
+  const bassAccidental = DEGREE_ACCIDENTAL_TO_TEXT[bassAlter];
+
+  if (!Number.isFinite(bassAlter) || bassAccidental === undefined) {
+    return "";
+  }
+
+  return `/${bassStep}${bassAccidental}`;
+}
+
 function getHarmonyChordSymbol(harmonyElement: Element): string | undefined {
   const rootStep = getRequiredChildText(harmonyElement, "root-step");
 
@@ -166,6 +225,7 @@ function getHarmonyChordSymbol(harmonyElement: Element): string | undefined {
   const kindElement = harmonyElement.querySelector("kind");
   const kindValue = kindElement?.textContent?.trim().toLowerCase() ?? "major";
   const kindText = kindElement?.getAttribute("text")?.trim();
+  const kindUsesSymbols = kindElement?.getAttribute("use-symbols") === "yes";
   const accidental =
     rootAlter === -2
       ? "bb"
@@ -176,13 +236,33 @@ function getHarmonyChordSymbol(harmonyElement: Element): string | undefined {
           : rootAlter === 2
             ? "##"
             : "";
-  const suffix = kindText ?? HARMONY_KIND_TO_SUFFIX[kindValue];
+  const suffix =
+    kindText ??
+    (kindUsesSymbols && kindValue === "major"
+      ? "maj7"
+      : HARMONY_KIND_TO_SUFFIX[kindValue]);
 
   if (suffix === undefined) {
     return undefined;
   }
 
-  return `${rootStep}${accidental}${suffix}`;
+  return `${rootStep}${accidental}${suffix}${getDegreeSuffixes(harmonyElement, suffix).join("")}${getBassSuffix(harmonyElement)}`;
+}
+
+function appendTimedChordSymbol(
+  chordSymbols: TimedChordSymbol[],
+  nextChordSymbol: TimedChordSymbol,
+): void {
+  const previousChordSymbol = chordSymbols.at(-1);
+
+  if (
+    previousChordSymbol?.offset === nextChordSymbol.offset &&
+    previousChordSymbol.symbol === nextChordSymbol.symbol
+  ) {
+    return;
+  }
+
+  chordSymbols.push(nextChordSymbol);
 }
 
 function getTimeSignature(
@@ -283,8 +363,8 @@ function parseMeasure(
   partState: ParseState,
 ): SegmentInput {
   const childElements = Array.from(measureElement.children);
+  const chordSymbols: TimedChordSymbol[] = [];
   const events: MeasureEvent[] = [];
-  let chordSymbol: string | undefined;
 
   partState.currentOffset = 0;
   partState.lastNoteOffset = undefined;
@@ -329,8 +409,16 @@ function parseMeasure(
       return;
     }
 
-    if (childElement.tagName === "harmony" && chordSymbol === undefined) {
-      chordSymbol = getHarmonyChordSymbol(childElement);
+    if (childElement.tagName === "harmony") {
+      const chordSymbol = getHarmonyChordSymbol(childElement);
+
+      if (chordSymbol !== undefined) {
+        appendTimedChordSymbol(chordSymbols, {
+          offset: partState.currentOffset,
+          symbol: chordSymbol,
+        });
+      }
+
       return;
     }
 
@@ -385,12 +473,46 @@ function parseMeasure(
     });
 
   return {
-    ...(chordSymbol === undefined ? {} : { chordSymbol }),
+    ...(chordSymbols.length === 0
+      ? {}
+      : {
+          chordSymbols,
+        }),
     events: normalizedEvents,
     ...(partState.timeSignature === undefined
       ? {}
       : { timeSignature: partState.timeSignature }),
   };
+}
+
+function mergeChordSymbols(
+  measures: SegmentInput[],
+  measureIndex: number,
+): TimedChordSymbol[] {
+  const merged: TimedChordSymbol[] = [];
+
+  measures.forEach((measure) => {
+    const timedChordSymbols = measure.chordSymbols ?? [];
+
+    timedChordSymbols.forEach((timedChordSymbol) => {
+      if (
+        !merged.some(
+          (candidate) =>
+            candidate.offset === timedChordSymbol.offset &&
+            candidate.symbol === timedChordSymbol.symbol,
+        )
+      ) {
+        merged.push(timedChordSymbol);
+      }
+    });
+  });
+
+  void measureIndex;
+
+  return merged.sort(
+    (left, right) =>
+      left.offset - right.offset || left.symbol.localeCompare(right.symbol),
+  );
 }
 
 function getPartMeasures(partElement: Element): SegmentInput[] {
@@ -431,7 +553,6 @@ export function parseMusicXml(xml: string): PieceInput {
   return {
     segments: Array.from({ length: measureCount }, (_, measureIndex) => {
       const mergedEvents: EventInput[] = [];
-      let chordSymbol: string | undefined;
       let timeSignature: TimeSignature | undefined;
 
       partMeasures.forEach((measures) => {
@@ -441,16 +562,18 @@ export function parseMusicXml(xml: string): PieceInput {
           return;
         }
 
-        if (chordSymbol === undefined) {
-          chordSymbol = measure.chordSymbol;
-        }
-
         if (timeSignature === undefined) {
           timeSignature = measure.timeSignature;
         }
 
         mergedEvents.push(...measure.events);
       });
+      const chordSymbols = mergeChordSymbols(
+        partMeasures
+          .map((measures) => measures[measureIndex])
+          .filter((measure): measure is SegmentInput => measure !== undefined),
+        measureIndex,
+      );
 
       mergedEvents.sort(
         (left, right) =>
@@ -459,7 +582,11 @@ export function parseMusicXml(xml: string): PieceInput {
       );
 
       return {
-        ...(chordSymbol === undefined ? {} : { chordSymbol }),
+        ...(chordSymbols.length === 0
+          ? {}
+          : {
+              chordSymbols,
+            }),
         events: mergedEvents,
         ...(timeSignature === undefined ? {} : { timeSignature }),
       };

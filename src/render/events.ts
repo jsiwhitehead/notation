@@ -11,7 +11,13 @@ import {
   type StemDirection,
 } from "./beams";
 import { getDurationDotCount, getShortDurationBeamCount } from "./duration";
-import { getYForPitch, PITCH_STEP_HEIGHT_PX, staffSpacesToPx } from "./metrics";
+import {
+  getYForPitch,
+  OUT_OF_FIELD_MARK_STROKE_WIDTH_PX,
+  OUT_OF_FIELD_MARK_WIDTH_PX,
+  PITCH_STEP_HEIGHT_PX,
+  staffSpacesToPx,
+} from "./metrics";
 import { createSvgElement, setAttributes } from "./svg";
 import {
   getAnchor,
@@ -21,6 +27,7 @@ import {
   getMusicFontFamily,
   type GlyphName,
 } from "./smufl";
+import type { ProjectedPitchOwnership, ProjectionEvent } from "../projection";
 
 const DURATION_EPSILON = 0.001;
 const QUARTER_DURATION = 1;
@@ -29,6 +36,7 @@ const WHOLE_DURATION = 4;
 const STEM_LENGTH_STAFF_SPACES = 3.5;
 const AUGMENTATION_DOT_OFFSET_PX = 8;
 const AUGMENTATION_DOT_SPACING_PX = 2;
+type PitchedProjectionEvent = Extract<ProjectionEvent, { type: "pitched" }>;
 
 type RenderGlyph = {
   box: ReturnType<typeof getGlyphBox>;
@@ -66,6 +74,7 @@ type RenderNoteheadGlyph = RenderGlyph & {
 
 type ShapedPitchedNotehead = {
   centerOffsetStaffSpaces: number;
+  isOutsideField: boolean;
   pitch: number;
 };
 
@@ -120,6 +129,7 @@ type RenderedPitchedEvent = {
 
 type PositionedNoteheadGraphic = {
   bounds: NoteheadBounds;
+  isOutsideField: boolean;
   originX: number;
   originY: number;
   pitch: number;
@@ -339,6 +349,26 @@ function appendNote(
   group.append(notehead);
 }
 
+function appendOutOfFieldMark(
+  group: SVGGElement,
+  centerX: number,
+  centerY: number,
+): void {
+  const line = createSvgElement("line");
+
+  setAttributes(line, {
+    stroke: "#111111",
+    "stroke-linecap": "butt",
+    "stroke-width": OUT_OF_FIELD_MARK_STROKE_WIDTH_PX,
+    x1: centerX - OUT_OF_FIELD_MARK_WIDTH_PX / 2,
+    x2: centerX + OUT_OF_FIELD_MARK_WIDTH_PX / 2,
+    y1: centerY,
+    y2: centerY,
+  });
+
+  group.append(line);
+}
+
 function appendAugmentationDots(
   group: SVGGElement,
   dotCount: number,
@@ -515,9 +545,11 @@ function getStemGeometry(
 function shapePitchedEvent(
   duration: number,
   layer: number,
-  pitches: number[],
+  pitchOwnerships: ProjectedPitchOwnership[],
 ): ShapedPitchedEvent | undefined {
-  const sortedPitches = [...pitches].sort((left, right) => left - right);
+  const sortedPitchOwnerships = [...pitchOwnerships].sort(
+    (left, right) => left.pitch - right.pitch,
+  );
   const noteheads: ShapedPitchedNotehead[] = [];
   const durationAppearance = getDurationAppearance(duration);
   const noteheadGlyph = durationAppearance.noteheadGlyph;
@@ -527,7 +559,8 @@ function shapePitchedEvent(
   const noteheadDisplacementStaffSpaces =
     getNoteheadDisplacementStaffSpaces(noteheadGlyph);
 
-  sortedPitches.forEach((pitch) => {
+  sortedPitchOwnerships.forEach((pitchOwnership) => {
+    const { pitch } = pitchOwnership;
     const previousNotehead = noteheads.at(-1);
     const overlapsPrevious =
       previousNotehead !== undefined &&
@@ -538,6 +571,7 @@ function shapePitchedEvent(
       centerOffsetStaffSpaces: overlapsPrevious
         ? noteheadDisplacementStaffSpaces
         : 0,
+      isOutsideField: pitchOwnership.fieldSpan === undefined,
       pitch,
     });
   });
@@ -558,8 +592,8 @@ function shapePitchedEvent(
       : undefined,
     stemTipPitch: hasStem
       ? stemDirection === "up"
-        ? sortedPitches.at(-1)
-        : sortedPitches[0]
+        ? sortedPitchOwnerships.at(-1)?.pitch
+        : sortedPitchOwnerships[0]?.pitch
       : undefined,
   };
 }
@@ -569,10 +603,10 @@ function buildPitchedEventGraphic(
   duration: number,
   isBeamed: boolean,
   layer: number,
-  pitches: number[],
+  pitchOwnerships: PitchedProjectionEvent["pitchOwnerships"],
 ): PitchedEventGraphic | undefined {
   const stemDirection = getStemDirection(layer);
-  const shapedEvent = shapePitchedEvent(duration, layer, pitches);
+  const shapedEvent = shapePitchedEvent(duration, layer, pitchOwnerships);
   const dotCount = getDurationDotCount(duration);
 
   if (shapedEvent === undefined) {
@@ -624,6 +658,7 @@ function positionPitchedEventGraphic(
 
     noteheads.push({
       bounds: noteheadBounds,
+      isOutsideField: notehead.isOutsideField,
       originX: noteheadOrigin.originX,
       originY: noteheadOrigin.originY,
       pitch: notehead.pitch,
@@ -672,6 +707,14 @@ function appendPositionedPitchedEvent(
   positionedEvent: PositionedPitchedEventGraphic,
 ): void {
   positionedEvent.noteheads.forEach((notehead) => {
+    if (notehead.isOutsideField) {
+      appendOutOfFieldMark(
+        fillGroup,
+        (notehead.bounds.left + notehead.bounds.right) / 2,
+        (notehead.bounds.top + notehead.bounds.bottom) / 2,
+      );
+    }
+
     appendNoteheadBackground(
       fillGroup,
       positionedEvent.noteheadGlyph,
@@ -702,7 +745,7 @@ function buildEventGraphic(
         projectedEvent.duration,
         beamedEventIndices.has(eventIndex),
         projectedEvent.layer,
-        projectedEvent.pitches,
+        projectedEvent.pitchOwnerships,
       );
     case "rest":
       return {

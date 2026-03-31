@@ -122,6 +122,30 @@ function areDisjointOrderedSpans(
   return left.end < right.start;
 }
 
+function areDisjointRepeatedSpans(
+  left: HarmonicRegionSpan,
+  right: HarmonicRegionSpan,
+): boolean {
+  return right.end < left.start + 12;
+}
+
+function getValidatedSortedPairLanes(
+  spans: [HarmonicRegionSpan, HarmonicRegionSpan],
+): [HarmonicRegionSpan, HarmonicRegionSpan] | undefined {
+  const sortedLaneSpans = [...spans].sort(
+    (left, right) => left.start - right.start || left.end - right.end,
+  ) as [HarmonicRegionSpan, HarmonicRegionSpan];
+
+  if (
+    !areDisjointOrderedSpans(sortedLaneSpans[0], sortedLaneSpans[1]) ||
+    !areDisjointRepeatedSpans(sortedLaneSpans[0], sortedLaneSpans[1])
+  ) {
+    return undefined;
+  }
+
+  return sortedLaneSpans;
+}
+
 function isTwoApartFifthsRun(pitchClasses: PitchClass[]): boolean {
   return pitchClasses.every((pitchClass, index) => {
     if (index === 0) {
@@ -178,9 +202,9 @@ function getCanonicalPairLanes(
   const contiguousSpans = buildToneSpacedPitchClassSpans(pitchClasses);
 
   if (contiguousSpans.length === 2) {
-    return [...contiguousSpans].sort(
-      (left, right) => left.start - right.start || left.end - right.end,
-    ) as [HarmonicRegionSpan, HarmonicRegionSpan];
+    return getValidatedSortedPairLanes(
+      contiguousSpans as [HarmonicRegionSpan, HarmonicRegionSpan],
+    );
   }
 
   const orderedPitchClasses =
@@ -213,16 +237,10 @@ function getCanonicalPairLanes(
     return undefined;
   }
 
-  const definedLaneSpans = [laneSpans[0], laneSpans[1]];
-  const sortedLaneSpans = definedLaneSpans.sort(
-    (left, right) => left.start - right.start || left.end - right.end,
-  ) as [HarmonicRegionSpan, HarmonicRegionSpan];
-
-  if (!areDisjointOrderedSpans(sortedLaneSpans[0], sortedLaneSpans[1])) {
-    return undefined;
-  }
-
-  return sortedLaneSpans;
+  return getValidatedSortedPairLanes([
+    laneSpans[0],
+    laneSpans[1],
+  ] as [HarmonicRegionSpan, HarmonicRegionSpan]);
 }
 
 function getCanonicalLanes(pitchClasses: PitchClass[]): HarmonicRegionSpan[] {

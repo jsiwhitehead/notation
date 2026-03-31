@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test";
 
 import { normalizeChordSymbol } from "../src/harmony/chord";
-import { buildRegion } from "../src/harmony/region";
+import { buildRegion, isBaselineValidRegion } from "../src/harmony/region";
 import { runEngine } from "../src/harmony";
 
 import type { HarmonicRegion, PieceInput, SegmentInput } from "../src/model";
+
+function chordSymbolsAtStart(symbol: string) {
+  return [{ offset: 0, symbol }];
+}
 
 describe("normalizeChordSymbol", () => {
   test("normalizes whitespace and letter case", () => {
@@ -74,6 +78,29 @@ describe("normalizeChordSymbol", () => {
     expect(normalizeChordSymbol("C13")?.pitchClasses).toEqual([0, 4, 7, 9, 10]);
   });
 
+  test("supports added-tone modifiers without implying a seventh", () => {
+    expect(normalizeChordSymbol("Cadd9")?.pitchClasses).toEqual([0, 2, 4, 7]);
+    expect(normalizeChordSymbol("Cadd#11")?.pitchClasses).toEqual([
+      0, 4, 6, 7,
+    ]);
+  });
+
+  test("always includes slash-ground in committed pitch classes", () => {
+    expect(normalizeChordSymbol("Cmaj/Gb")).toEqual({
+      groundPitchClass: 6,
+      pitchClasses: [0, 4, 6, 7],
+      rootPitchClass: 0,
+    });
+  });
+
+  test("ignores unsupported added degrees", () => {
+    expect(normalizeChordSymbol("Cadd8")).toEqual({
+      groundPitchClass: 0,
+      pitchClasses: [0, 4, 7],
+      rootPitchClass: 0,
+    });
+  });
+
   test("returns undefined for invalid symbols", () => {
     expect(normalizeChordSymbol("not-a-chord")).toBeUndefined();
     expect(normalizeChordSymbol("")).toBeUndefined();
@@ -140,6 +167,16 @@ describe("buildRegion", () => {
       pitchClasses: [0, 11, 1],
     });
   });
+
+  test("rejects paired lanes that overlap after octave repetition", () => {
+    expect(isBaselineValidRegion([2, 9, 4, 11, 6, 1, 8, 3])).toBe(false);
+    expect(buildRegion([2, 9, 4, 11, 6, 1, 8, 3]).lanes).toEqual([
+      { end: 2, start: 2 },
+      { end: 3, start: 3 },
+      { end: 8, start: 4 },
+      { end: 13, start: 9 },
+    ]);
+  });
 });
 
 describe("runEngine", () => {
@@ -148,7 +185,7 @@ describe("runEngine", () => {
       const input = {
         segments: [
           {
-            chordSymbol: "Cmaj7",
+            chordSymbols: chordSymbolsAtStart("Cmaj7"),
             events: [{ duration: 1, pitch: 62, type: "note" as const }],
           },
         ],
@@ -178,7 +215,7 @@ describe("runEngine", () => {
 
     test("treats chord symbols as one committed local evidence set", () => {
       const segment = getSingleSegment({
-        chordSymbol: "Cmaj7",
+        chordSymbols: chordSymbolsAtStart("Cmaj7"),
         events: [],
       });
 
@@ -189,7 +226,7 @@ describe("runEngine", () => {
 
     test("combines melodic events and chord symbols into one local center", () => {
       const segment = getSingleSegment({
-        chordSymbol: "Cmaj",
+        chordSymbols: chordSymbolsAtStart("Cmaj"),
         events: [{ duration: 1, pitch: 62, type: "note" }],
       });
 
@@ -252,7 +289,7 @@ describe("runEngine", () => {
 
     test("uses chord root and ground to orient local grounding", () => {
       const segment = getSingleSegment({
-        chordSymbol: "Dmin7/A",
+        chordSymbols: chordSymbolsAtStart("Dmin7/A"),
         events: [],
       });
 
@@ -263,7 +300,7 @@ describe("runEngine", () => {
 
     test("fills short internal fifth-gaps in dominant-seventh evidence", () => {
       const segment = getSingleSegment({
-        chordSymbol: "G7",
+        chordSymbols: chordSymbolsAtStart("G7"),
         events: [],
       });
 
@@ -272,20 +309,20 @@ describe("runEngine", () => {
       expect(segment.grounding).toEqual({ ground: 7, root: 7 });
     });
 
-    test("keeps altered-fifth chord evidence sparse rather than forcing a naturalized run", () => {
+    test("keeps altered-fifth chord evidence as its direct local region", () => {
       const segment = getSingleSegment({
-        chordSymbol: "C7b5",
+        chordSymbols: chordSymbolsAtStart("C7b5"),
         events: [],
       });
 
-      expectRegionPitchClasses(segment.center, []);
-      expectRegionPitchClasses(segment.field, []);
+      expectRegionPitchClasses(segment.center, [0, 4, 6, 10]);
+      expectRegionPitchClasses(segment.field, [0, 4, 6, 10]);
       expect(segment.grounding).toEqual({ ground: 0, root: 0 });
     });
 
     test("treats augmented-triad evidence as invalid under the baseline two-span rule", () => {
       const segment = getSingleSegment({
-        chordSymbol: "Caug",
+        chordSymbols: chordSymbolsAtStart("Caug"),
         events: [],
       });
 
@@ -296,7 +333,7 @@ describe("runEngine", () => {
 
     test("treats diminished-seventh evidence as invalid when its paired lanes overlap", () => {
       const segment = getSingleSegment({
-        chordSymbol: "Bdim7",
+        chordSymbols: chordSymbolsAtStart("Bdim7"),
         events: [],
       });
 
@@ -333,7 +370,7 @@ describe("runEngine", () => {
       expect(segment.grounding).toBeUndefined();
     });
 
-    test("rescues a longer direct chromatic run when filling reaches a paired baseline region", () => {
+    test("keeps a longer direct chromatic run empty when filling would require overlapping paired lanes", () => {
       const segment = getSingleSegment({
         events: [
           { duration: 1, pitch: 60, type: "note" },
@@ -343,8 +380,8 @@ describe("runEngine", () => {
         ],
       });
 
-      expectRegionPitchClasses(segment.center, [0, 7, 2, 1, 8, 3, 10, 5]);
-      expectRegionPitchClasses(segment.field, [0, 7, 2, 1, 8, 3, 10, 5]);
+      expectRegionPitchClasses(segment.center, []);
+      expectRegionPitchClasses(segment.field, []);
       expect(segment.grounding).toBeUndefined();
     });
 
@@ -374,7 +411,7 @@ describe("runEngine", () => {
 
     test("keeps an extension-bearing local center as one direct evidence set", () => {
       const segment = getSingleSegment({
-        chordSymbol: "C13",
+        chordSymbols: chordSymbolsAtStart("C13"),
         events: [],
       });
 
@@ -385,7 +422,7 @@ describe("runEngine", () => {
 
     test("keeps suspended harmony from inventing third-quality content", () => {
       const segment = getSingleSegment({
-        chordSymbol: "Csus4",
+        chordSymbols: chordSymbolsAtStart("Csus4"),
         events: [],
       });
 
@@ -396,7 +433,7 @@ describe("runEngine", () => {
 
     test("treats altered extension evidence as invalid when its paired lanes overlap", () => {
       const segment = getSingleSegment({
-        chordSymbol: "C7#11",
+        chordSymbols: chordSymbolsAtStart("C7#11"),
         events: [],
       });
 
@@ -420,14 +457,14 @@ describe("runEngine", () => {
 
     test("is invariant to event ordering within a segment", () => {
       const forward = getSingleSegment({
-        chordSymbol: "Cmaj7",
+        chordSymbols: chordSymbolsAtStart("Cmaj7"),
         events: [
           { duration: 1, pitch: 62, type: "note" },
           { duration: 1, pitches: [60, 64, 67], type: "chord" },
         ],
       });
       const reversed = getSingleSegment({
-        chordSymbol: "Cmaj7",
+        chordSymbols: chordSymbolsAtStart("Cmaj7"),
         events: [
           { duration: 1, pitches: [60, 64, 67], type: "chord" },
           { duration: 1, pitch: 62, type: "note" },
@@ -519,15 +556,15 @@ describe("runEngine", () => {
     const structure = runEngine({
       segments: [
         {
-          chordSymbol: "Cmaj",
+          chordSymbols: chordSymbolsAtStart("Cmaj"),
           events: [],
         },
         {
-          chordSymbol: "Cmaj7",
+          chordSymbols: chordSymbolsAtStart("Cmaj7"),
           events: [],
         },
         {
-          chordSymbol: "C6/9",
+          chordSymbols: chordSymbolsAtStart("C6/9"),
           events: [],
         },
       ],
@@ -549,15 +586,15 @@ describe("runEngine", () => {
     const structure = runEngine({
       segments: [
         {
-          chordSymbol: "Dmin7",
+          chordSymbols: chordSymbolsAtStart("Dmin7"),
           events: [],
         },
         {
-          chordSymbol: "G7",
+          chordSymbols: chordSymbolsAtStart("G7"),
           events: [],
         },
         {
-          chordSymbol: "Cmaj7",
+          chordSymbols: chordSymbolsAtStart("Cmaj7"),
           events: [],
         },
       ],
@@ -591,11 +628,11 @@ describe("runEngine", () => {
     const structure = runEngine({
       segments: [
         {
-          chordSymbol: "G7",
+          chordSymbols: chordSymbolsAtStart("G7"),
           events: [],
         },
         {
-          chordSymbol: "Cmaj7",
+          chordSymbols: chordSymbolsAtStart("Cmaj7"),
           events: [],
         },
       ],
@@ -624,11 +661,11 @@ describe("runEngine", () => {
     const structure = runEngine({
       segments: [
         {
-          chordSymbol: "Dmin7",
+          chordSymbols: chordSymbolsAtStart("Dmin7"),
           events: [],
         },
         {
-          chordSymbol: "G7",
+          chordSymbols: chordSymbolsAtStart("G7"),
           events: [],
         },
       ],
@@ -654,15 +691,15 @@ describe("runEngine", () => {
     const structure = runEngine({
       segments: [
         {
-          chordSymbol: "Dmin7",
+          chordSymbols: chordSymbolsAtStart("Dmin7"),
           events: [],
         },
         {
-          chordSymbol: "G7",
+          chordSymbols: chordSymbolsAtStart("G7"),
           events: [],
         },
         {
-          chordSymbol: "Amin7",
+          chordSymbols: chordSymbolsAtStart("Amin7"),
           events: [],
         },
       ],
@@ -693,11 +730,11 @@ describe("runEngine", () => {
     const structure = runEngine({
       segments: [
         {
-          chordSymbol: "Cmaj7",
+          chordSymbols: chordSymbolsAtStart("Cmaj7"),
           events: [],
         },
         {
-          chordSymbol: "Abmaj7",
+          chordSymbols: chordSymbolsAtStart("Abmaj7"),
           events: [],
         },
       ],
@@ -719,11 +756,11 @@ describe("runEngine", () => {
     const structure = runEngine({
       segments: [
         {
-          chordSymbol: "Cmaj",
+          chordSymbols: chordSymbolsAtStart("Cmaj"),
           events: [],
         },
         {
-          chordSymbol: "F#maj",
+          chordSymbols: chordSymbolsAtStart("F#maj"),
           events: [],
         },
       ],
@@ -789,5 +826,86 @@ describe("runEngine", () => {
       structure.segments[0]!.harmonicSlices[1]!.harmonic.field,
       [0, 7, 2, 9, 4, 11, 6],
     );
+  });
+
+  test("preserves timed chord-symbol grounding across a slice split", () => {
+    const structure = runEngine({
+      segments: [
+        {
+          chordSymbols: [
+            { offset: 0, symbol: "Cmaj7" },
+            { offset: 2, symbol: "F#maj7" },
+          ],
+          events: [
+            { duration: 2, offset: 0, pitches: [60, 64, 67], type: "chord" },
+            { duration: 2, offset: 2, pitches: [66, 70, 73], type: "chord" },
+          ],
+        },
+      ],
+    });
+
+    expect(structure.segments[0]!.harmonicSlices).toHaveLength(2);
+    expect(structure.segments[0]!.harmonicSlices[0]!.startOffset).toBe(0);
+    expect(
+      structure.segments[0]!.harmonicSlices[0]!.harmonic.grounding,
+    ).toEqual({ ground: 0, root: 0 });
+    expect(structure.segments[0]!.harmonicSlices[1]!.startOffset).toBe(2);
+    expect(
+      structure.segments[0]!.harmonicSlices[1]!.harmonic.grounding,
+    ).toEqual({ ground: 6, root: 6 });
+  });
+
+  test("leaves segment grounding undefined when multiple timed chord symbols contribute evidence", () => {
+    const structure = runEngine({
+      segments: [
+        {
+          chordSymbols: [
+            { offset: 0, symbol: "Cmaj7" },
+            { offset: 2, symbol: "F#maj7" },
+          ],
+          events: [
+            { duration: 2, offset: 0, pitches: [60, 64, 67], type: "chord" },
+            { duration: 2, offset: 2, pitches: [66, 70, 73], type: "chord" },
+          ],
+        },
+      ],
+    });
+
+    expect(structure.segments[0]!.grounding).toBeUndefined();
+  });
+
+  test("uses every chord-symbol change as a slice boundary", () => {
+    const structure = runEngine({
+      segments: [
+        {
+          chordSymbols: [
+            { offset: 0, symbol: "Cmaj7" },
+            { offset: 1, symbol: "F#maj7" },
+            { offset: 3, symbol: "Abmaj7" },
+          ],
+          events: [
+            { duration: 1, offset: 0, pitches: [60, 64, 67], type: "chord" },
+            { duration: 2, offset: 1, pitches: [66, 70, 73], type: "chord" },
+            { duration: 1, offset: 3, pitches: [68, 72, 75], type: "chord" },
+          ],
+        },
+      ],
+    });
+
+    expect(structure.segments[0]!.harmonicSlices).toHaveLength(3);
+    expect(structure.segments[0]!.harmonicSlices).toMatchObject([
+      { duration: 1, startOffset: 0 },
+      { duration: 2, startOffset: 1 },
+      { duration: 1, startOffset: 3 },
+    ]);
+    expect(
+      structure.segments[0]!.harmonicSlices[0]!.harmonic.grounding,
+    ).toEqual({ ground: 0, root: 0 });
+    expect(
+      structure.segments[0]!.harmonicSlices[1]!.harmonic.grounding,
+    ).toEqual({ ground: 6, root: 6 });
+    expect(
+      structure.segments[0]!.harmonicSlices[2]!.harmonic.grounding,
+    ).toEqual({ ground: 8, root: 8 });
   });
 });

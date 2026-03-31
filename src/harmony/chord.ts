@@ -36,10 +36,35 @@ type HarmonyQuality =
   | "suspended-fourth"
   | "suspended-second";
 
+type AccidentalOffset = -1 | 0 | 1;
 type SeventhKind = "diminished" | "major" | "minor" | "none";
-type FifthKind = "flat" | "natural" | "sharp";
-type NinthKind = "flat" | "natural" | "none" | "sharp";
-type EleventhKind = "natural" | "none" | "sharp";
+type Modifier =
+  | {
+      accidental: AccidentalOffset;
+      degree: number;
+      type: "add";
+    }
+  | {
+      accidental: -1 | 1;
+      degree: 5 | 9 | 11 | 13;
+      type: "alter";
+    };
+type DescriptorToken =
+  | {
+      quality: HarmonyQuality;
+      type: "quality";
+    }
+  | {
+      modifier: Modifier;
+      type: "modifier";
+    }
+  | {
+      kind: SeventhKind;
+      type: "seventh";
+    }
+  | {
+      type: "sixth";
+    };
 
 const ROOT_PITCH_CLASSES = {
   a: 9,
@@ -71,17 +96,19 @@ const BASE_INTERVALS = {
   "suspended-fourth": [0, 5, 7],
   "suspended-second": [0, 2, 7],
 } satisfies Record<HarmonyQuality, PitchClass[]>;
+const SUPPORTED_ADD_DEGREES = [2, 4, 5, 6, 7, 9, 11, 13] as const;
+const SEVENTH_TOKEN_PATTERNS = [
+  { kind: "major" as const, pattern: /maj7/g },
+  { kind: "diminished" as const, pattern: /dim7/g },
+];
 
 type ParsedHarmonySymbol = {
   bassName?: RootName;
-  eleventh: EleventhKind;
-  fifth: FifthKind;
-  ninth: NinthKind;
+  modifiers: Modifier[];
   quality: HarmonyQuality;
   rootName: RootName;
   seventh: SeventhKind;
   sixth: boolean;
-  thirteenth: boolean;
 };
 
 function getRootFromName(rootName: RootName): PitchClass {
@@ -96,6 +123,35 @@ function getRootName(symbol: string): RootName | undefined {
   }
 
   return rootMatch[0] as RootName;
+}
+
+function parseRootAndBass(symbol: string): {
+  bassName?: RootName;
+  descriptor: string;
+  rootName: RootName;
+} | undefined {
+  const bassMatch = symbol.match(/\/(c|d|e|f|g|a|b)(b|#)?$/);
+
+  if (symbol.includes("/") && bassMatch === null && !symbol.includes("6/9")) {
+    return undefined;
+  }
+
+  const body =
+    bassMatch === null ? symbol : symbol.slice(0, symbol.length - bassMatch[0].length);
+  const rootName = getRootName(body);
+
+  if (rootName === undefined) {
+    return undefined;
+  }
+
+  const bassName =
+    bassMatch === null ? undefined : getRootName(bassMatch[0].slice(1));
+
+  return {
+    ...(bassName === undefined ? {} : { bassName }),
+    descriptor: body.slice(rootName.length),
+    rootName,
+  };
 }
 
 function getHarmonyQuality(symbol: string): HarmonyQuality {
@@ -130,83 +186,229 @@ function getHarmonyQuality(symbol: string): HarmonyQuality {
   return "major";
 }
 
-function parseHarmonySymbol(symbol: string): ParsedHarmonySymbol | undefined {
-  const normalized = symbol.trim().toLowerCase();
-  const bassMatch = normalized.match(/\/(c|d|e|f|g|a|b)(b|#)?$/);
+function getAccidentalOffset(
+  accidental: "" | "#" | "b",
+): AccidentalOffset {
+  return accidental === "#"
+    ? 1
+    : accidental === "b"
+      ? -1
+      : 0;
+}
 
-  if (
-    normalized.includes("/") &&
-    bassMatch === null &&
-    !normalized.includes("6/9")
-  ) {
+function getIntervalForDegree(
+  degree: number,
+  accidental: AccidentalOffset,
+): PitchClass | undefined {
+  const degreeClassByDegree: Partial<Record<number, number>> = {
+    2: 2,
+    4: 4,
+    5: 5,
+    6: 6,
+    7: 7,
+    9: 2,
+    11: 4,
+    13: 6,
+  };
+  const baseIntervalByDegreeClass: Record<number, PitchClass> = {
+    2: 2,
+    4: 5,
+    5: 7,
+    6: 9,
+    7: 11,
+  };
+  const degreeClass = degreeClassByDegree[degree];
+
+  if (degreeClass === undefined) {
     return undefined;
   }
 
-  const body =
-    bassMatch === null
-      ? normalized
-      : normalized.slice(0, normalized.length - bassMatch[0].length);
-  const rootName = getRootName(body);
+  const baseInterval = baseIntervalByDegreeClass[degreeClass];
 
-  if (rootName === undefined) {
-    return undefined;
+  return baseInterval === undefined
+    ? undefined
+    : toPitchClass(baseInterval + accidental);
+}
+
+function isSupportedAddDegree(degree: number): boolean {
+  return (SUPPORTED_ADD_DEGREES as readonly number[]).includes(degree);
+}
+
+function tokenizeDescriptor(descriptor: string): DescriptorToken[] {
+  const tokens: DescriptorToken[] = [
+    { quality: getHarmonyQuality(descriptor), type: "quality" },
+  ];
+  const consumedRanges: Array<{ end: number; start: number }> = [];
+  const markConsumed = (start: number, end: number): void => {
+    consumedRanges.push({ end, start });
+  };
+  const isConsumed = (start: number, end: number): boolean =>
+    consumedRanges.some((range) => start < range.end && end > range.start);
+
+  Array.from(descriptor.matchAll(/add(#|b)?(\d+)/g)).forEach((match) => {
+    const index = match.index;
+
+    if (index === undefined) {
+      return;
+    }
+
+    markConsumed(index, index + match[0].length);
+    const degree = Number(match[2]);
+
+    if (!isSupportedAddDegree(degree)) {
+      return;
+    }
+
+    tokens.push({
+      modifier: {
+        accidental: getAccidentalOffset((match[1] ?? "") as "" | "#" | "b"),
+        degree,
+        type: "add",
+      },
+      type: "modifier",
+    });
+  });
+
+  SEVENTH_TOKEN_PATTERNS.forEach(({ kind, pattern }) => {
+    Array.from(descriptor.matchAll(pattern)).forEach((match) => {
+      const index = match.index;
+
+      if (index === undefined || isConsumed(index, index + match[0].length)) {
+        return;
+      }
+
+      markConsumed(index, index + match[0].length);
+      tokens.push({ kind, type: "seventh" });
+    });
+  });
+
+  Array.from(descriptor.matchAll(/(b|#)(5|9|11|13)/g)).forEach((match) => {
+    const index = match.index;
+
+    if (index === undefined || isConsumed(index, index + match[0].length)) {
+      return;
+    }
+
+    markConsumed(index, index + match[0].length);
+    tokens.push({
+      modifier: {
+        accidental: getAccidentalOffset(match[1] as "#" | "b") as -1 | 1,
+        degree: Number(match[2]) as 5 | 9 | 11 | 13,
+        type: "alter",
+      },
+      type: "modifier",
+    });
+  });
+
+  if (descriptor.includes("6/9")) {
+    const index = descriptor.indexOf("6/9");
+    markConsumed(index, index + 3);
+    tokens.push({ type: "sixth" });
+    tokens.push({
+      modifier: {
+        accidental: 0,
+        degree: 9,
+        type: "add",
+      },
+      type: "modifier",
+    });
   }
 
-  const descriptor = body.slice(rootName.length);
-  const includesSixNine = descriptor.includes("6/9");
-  const seventh = descriptor.includes("maj7")
-    ? "major"
-    : descriptor.includes("dim7")
-      ? "diminished"
-      : !includesSixNine && /(^|[^0-9])(7|9|11|13)/.test(descriptor)
-        ? "minor"
-        : "none";
-  const sixth = includesSixNine || /(^|[^0-9])6([^0-9]|$)/.test(descriptor);
-  const ninth = descriptor.includes("b9")
-    ? "flat"
-    : descriptor.includes("#9")
-      ? "sharp"
-      : includesSixNine || descriptor.includes("9")
-        ? "natural"
-        : "none";
-  const eleventh = descriptor.includes("#11")
-    ? "sharp"
-    : descriptor.includes("11")
-      ? "natural"
-      : "none";
-  const thirteenth = descriptor.includes("13");
-  const fifth = descriptor.includes("b5")
-    ? "flat"
-    : descriptor.includes("#5")
-      ? "sharp"
-      : "natural";
+  Array.from(descriptor.matchAll(/(^|[^0-9#b])(7|9|11|13)([^0-9]|$)/g)).forEach(
+    (match) => {
+      const degreeText = match[2]!;
+      const index = (match.index ?? 0) + match[1]!.length;
+      const end = index + degreeText.length;
+
+      if (isConsumed(index, end)) {
+        return;
+      }
+
+      markConsumed(index, end);
+
+      if (degreeText === "7") {
+        tokens.push({ kind: "minor", type: "seventh" });
+        return;
+      }
+
+      tokens.push({ kind: "minor", type: "seventh" });
+      tokens.push({
+        modifier: {
+          accidental: 0,
+          degree: Number(degreeText),
+          type: "add",
+        },
+        type: "modifier",
+      });
+    },
+  );
+
+  Array.from(descriptor.matchAll(/(^|[^0-9])6([^0-9]|$)/g)).forEach((match) => {
+    const index = (match.index ?? 0) + match[1]!.length;
+    const end = index + 1;
+
+    if (isConsumed(index, end)) {
+      return;
+    }
+
+    markConsumed(index, end);
+    tokens.push({ type: "sixth" });
+  });
+
+  return tokens;
+}
+
+function buildParsedHarmony(
+  descriptor: string,
+  rootName: RootName,
+  bassName?: RootName,
+): ParsedHarmonySymbol {
+  const tokens = tokenizeDescriptor(descriptor);
+  const qualityToken = tokens.find(
+    (token): token is Extract<DescriptorToken, { type: "quality" }> =>
+      token.type === "quality",
+  );
+
+  if (qualityToken === undefined) {
+    throw new Error("Chord descriptor tokenization must emit a quality token.");
+  }
+
+  const modifiers = tokens.flatMap((token) =>
+    token.type === "modifier" ? [token.modifier] : [],
+  );
+  const seventh =
+    tokens.find((token) => token.type === "seventh")?.kind ?? "none";
+  const sixth = tokens.some((token) => token.type === "sixth");
 
   return {
-    eleventh,
-    fifth,
-    ninth,
-    quality: getHarmonyQuality(descriptor),
+    ...(bassName === undefined ? {} : { bassName }),
+    modifiers,
+    quality: qualityToken.quality,
     rootName,
     seventh,
     sixth,
-    thirteenth,
-    ...(() => {
-      if (bassMatch === null) {
-        return {};
-      }
-
-      const bassName = getRootName(bassMatch[0].slice(1));
-
-      return bassName === undefined ? {} : { bassName };
-    })(),
   };
+}
+
+function parseHarmonySymbol(symbol: string): ParsedHarmonySymbol | undefined {
+  const parsedRootAndBass = parseRootAndBass(symbol.trim().toLowerCase());
+
+  if (parsedRootAndBass === undefined) {
+    return undefined;
+  }
+
+  return buildParsedHarmony(
+    parsedRootAndBass.descriptor,
+    parsedRootAndBass.rootName,
+    parsedRootAndBass.bassName,
+  );
 }
 
 function getBaseIntervals(quality: HarmonyQuality): PitchClass[] {
   return BASE_INTERVALS[quality];
 }
 
-function applyExtensions(
+function applyStructuralIntervals(
   baseIntervals: PitchClass[],
   parsedSymbol: ParsedHarmonySymbol,
 ): PitchClass[] {
@@ -230,68 +432,37 @@ function applyExtensions(
     intervals = [...intervals, 9];
   }
 
-  if (parsedSymbol.ninth === "natural") {
-    intervals = [...intervals, 2];
-  }
-
-  if (parsedSymbol.eleventh === "natural") {
-    intervals = [...intervals, 5];
-  }
-
-  if (parsedSymbol.thirteenth) {
-    intervals = [...intervals, 9];
-  }
-
   return intervals;
 }
 
-function applyAlterations(
-  baseIntervals: PitchClass[],
-  parsedSymbol: ParsedHarmonySymbol,
+function applyModifier(
+  intervals: PitchClass[],
+  modifier: Modifier,
 ): PitchClass[] {
-  let intervals = [...baseIntervals];
+  const interval = getIntervalForDegree(modifier.degree, modifier.accidental);
 
-  switch (parsedSymbol.fifth) {
-    case "flat":
-      intervals = intervals.map((interval) => (interval === 7 ? 6 : interval));
-      break;
-    case "sharp":
-      intervals = intervals.map((interval) => (interval === 7 ? 8 : interval));
-      break;
-    case "natural":
-      break;
+  if (interval === undefined) {
+    return intervals;
   }
 
-  switch (parsedSymbol.ninth) {
-    case "flat":
-      intervals = [...intervals, 1];
-      break;
-    case "sharp":
-      intervals = [...intervals, 3];
-      break;
-    case "natural":
-    case "none":
-      break;
+  if (modifier.type === "alter" && modifier.degree === 5) {
+    return intervals.includes(7)
+      ? intervals.map((candidate) => (candidate === 7 ? interval : candidate))
+      : [...intervals, interval];
   }
 
-  switch (parsedSymbol.eleventh) {
-    case "sharp":
-      intervals = [...intervals, 6];
-      break;
-    case "natural":
-    case "none":
-      break;
-  }
-
-  return intervals;
+  return [...intervals, interval];
 }
 
 function getGuidancePitchClasses(
   parsedSymbol: ParsedHarmonySymbol,
 ): PitchClass[] {
   const baseIntervals = getBaseIntervals(parsedSymbol.quality);
-  const withExtensions = applyExtensions(baseIntervals, parsedSymbol);
-  const completeIntervals = applyAlterations(withExtensions, parsedSymbol);
+  const structuralIntervals = applyStructuralIntervals(baseIntervals, parsedSymbol);
+  const completeIntervals = parsedSymbol.modifiers.reduce(
+    (intervals, modifier) => applyModifier(intervals, modifier),
+    structuralIntervals,
+  );
 
   return uniqueSortedPitchClasses(
     completeIntervals.map((interval) =>
@@ -314,10 +485,14 @@ export function normalizeChordSymbol(
     parsedSymbol.bassName === undefined
       ? rootPitchClass
       : getRootFromName(parsedSymbol.bassName);
+  const pitchClasses = uniqueSortedPitchClasses([
+    ...getGuidancePitchClasses(parsedSymbol),
+    groundPitchClass,
+  ]);
 
   return {
     groundPitchClass,
-    pitchClasses: getGuidancePitchClasses(parsedSymbol),
+    pitchClasses,
     rootPitchClass,
   };
 }

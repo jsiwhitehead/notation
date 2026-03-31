@@ -1,5 +1,5 @@
 // @ts-ignore Bun loads this asset as text via the import attribute.
-import sampleMusicXml from "../examples/mozart-sonata-16-allegro.musicxml" with { type: "text" };
+import sampleMusicXml from "../examples/but-not-for-me.musicxml" with { type: "text" };
 import { runEngine } from "./harmony";
 import { parseMusicXml } from "./import";
 import { buildProjection } from "./projection";

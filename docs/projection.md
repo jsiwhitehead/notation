@@ -57,7 +57,7 @@ Harmony-stage `HarmonicSlice` currently contains:
 
 Projected events currently also carry their resolved `layer`, preserved offset and duration timing, and a segment-local x-position derived from projection-owned time-position spacing. Ordered `timePositions` expose the shared onset structure that spacing is built from, and `segmentWidthUnits` carries the segment-level width demand derived from that spacing in projection-local layout units. Harmonic slices use segment-local timing together with those shared time positions to determine render-time horizontal extent inside the segment.
 
-For pitched events, projection also carries explicit field-span ownership for each projected pitch. That ownership is resolved against the projected slice-local field spans and stored as plain owned span bounds, so rendering does not need to infer notehead attachment from slice timing and pitch content a second time.
+For pitched events, projection also carries explicit field-span ownership for each projected pitch. That ownership is resolved against the projected slice-local field spans and stored as plain owned span bounds, so rendering does not need to infer notehead attachment from slice timing and pitch content a second time. In the current implementation, a pitch only counts as owned when it lies on the projected span's actual tone-step lattice rather than merely falling inside the span's numeric pitch range.
 
 Each projected harmonic region currently contains:
 
@@ -104,7 +104,7 @@ In the current implementation, projection:
 13. derives projected `root` and `ground` marks from `grounding` within the segment's projected harmonic span extent when grounding is present
 14. emits one or more variable-length `harmonicSlices` per segment from harmony-stage `HarmonicSlice` analysis, with one full-segment slice when no stronger local split is warranted
 15. carries forward slice-local harmonic field, slice-local harmonic center, and optional grounding
-16. assigns explicit owning field spans to pitched event notes from those projected harmonic slices
+16. assigns explicit owning field spans to pitched event notes from those projected harmonic slices, only when the projected pitch lies on the owning span's tone-step lattice
 17. emits projection as the unified structure consumed by the renderer
 
 In the current implementation, projection does not decide harmonic slice boundaries or baseline harmonic region shape itself. It consumes harmony-stage `HarmonicSlice` analysis, converts slice timing into segment-local x extents, repeats harmony-stage harmonic span classes into visible pitch-space, resolves visible join geometry between adjacent projected regions, and assigns projected event ownership against those already-projected harmonic spans.
