@@ -550,31 +550,16 @@ function shapePitchedEvent(
   const sortedPitchOwnerships = [...pitchOwnerships].sort(
     (left, right) => left.pitch - right.pitch,
   );
-  const noteheads: ShapedPitchedNotehead[] = [];
   const durationAppearance = getDurationAppearance(duration);
   const noteheadGlyph = durationAppearance.noteheadGlyph;
   const hasStem = durationAppearance.hasStem;
   const stemDirection = getStemDirection(layer);
   const flagGlyph = getFlagGlyph(duration, stemDirection);
-  const noteheadDisplacementStaffSpaces =
-    getNoteheadDisplacementStaffSpaces(noteheadGlyph);
-
-  sortedPitchOwnerships.forEach((pitchOwnership) => {
-    const { pitch } = pitchOwnership;
-    const previousNotehead = noteheads.at(-1);
-    const overlapsPrevious =
-      previousNotehead !== undefined &&
-      (pitch - previousNotehead.pitch) * PITCH_STEP_HEIGHT_PX <
-        staffSpacesToPx(noteheadGlyph.heightStaffSpaces);
-
-    noteheads.push({
-      centerOffsetStaffSpaces: overlapsPrevious
-        ? noteheadDisplacementStaffSpaces
-        : 0,
-      isOutsideField: pitchOwnership.fieldSpan === undefined,
-      pitch,
-    });
-  });
+  const noteheads = getShapedPitchedNoteheads(
+    sortedPitchOwnerships,
+    noteheadGlyph,
+    stemDirection,
+  );
 
   if (noteheads.length === 0) {
     return undefined;
@@ -585,17 +570,117 @@ function shapePitchedEvent(
     hasStem,
     noteheadGlyph,
     noteheads,
-    stemBaseNotehead: hasStem
-      ? stemDirection === "up"
-        ? noteheads[0]
-        : noteheads.at(-1)
-      : undefined,
-    stemTipPitch: hasStem
-      ? stemDirection === "up"
-        ? sortedPitchOwnerships.at(-1)?.pitch
-        : sortedPitchOwnerships[0]?.pitch
-      : undefined,
+    stemBaseNotehead: getStemBaseNotehead(noteheads, hasStem, stemDirection),
+    stemTipPitch: getStemTipPitch(sortedPitchOwnerships, hasStem, stemDirection),
   };
+}
+
+function getCollisionScanPitchOwnerships(
+  sortedPitchOwnerships: ProjectedPitchOwnership[],
+  stemDirection: StemDirection,
+): ProjectedPitchOwnership[] {
+  return stemDirection === "up"
+    ? sortedPitchOwnerships
+    : [...sortedPitchOwnerships].reverse();
+}
+
+function getNoteheadCenterOffsetStaffSpacesByPitch(
+  sortedPitchOwnerships: ProjectedPitchOwnership[],
+  noteheadGlyph: RenderNoteheadGlyph,
+  stemDirection: StemDirection,
+): Map<number, number> {
+  const noteheadDisplacementStaffSpaces =
+    getNoteheadDisplacementStaffSpaces(noteheadGlyph);
+  const centerOffsetStaffSpacesByPitch = new Map<number, number>();
+  let previousCollisionPitch: number | undefined;
+
+  getCollisionScanPitchOwnerships(sortedPitchOwnerships, stemDirection).forEach(
+    ({ pitch }) => {
+      const overlapsPrevious =
+        previousCollisionPitch !== undefined &&
+        Math.abs(pitch - previousCollisionPitch) * PITCH_STEP_HEIGHT_PX <
+          staffSpacesToPx(noteheadGlyph.heightStaffSpaces);
+
+      centerOffsetStaffSpacesByPitch.set(
+        pitch,
+        overlapsPrevious
+          ? stemDirection === "up"
+            ? noteheadDisplacementStaffSpaces
+            : -noteheadDisplacementStaffSpaces
+          : 0,
+      );
+      previousCollisionPitch = pitch;
+    },
+  );
+
+  return centerOffsetStaffSpacesByPitch;
+}
+
+function getShapedPitchedNoteheads(
+  sortedPitchOwnerships: ProjectedPitchOwnership[],
+  noteheadGlyph: RenderNoteheadGlyph,
+  stemDirection: StemDirection,
+): ShapedPitchedNotehead[] {
+  const pitchOwnershipsByPitch = new Map(
+    sortedPitchOwnerships.map((pitchOwnership) => [
+      pitchOwnership.pitch,
+      pitchOwnership,
+    ]),
+  );
+  const centerOffsetStaffSpacesByPitch = getNoteheadCenterOffsetStaffSpacesByPitch(
+    sortedPitchOwnerships,
+    noteheadGlyph,
+    stemDirection,
+  );
+
+  return sortedPitchOwnerships.map(({ pitch }) => ({
+    centerOffsetStaffSpaces: centerOffsetStaffSpacesByPitch.get(pitch) ?? 0,
+    isOutsideField: pitchOwnershipsByPitch.get(pitch)?.fieldSpan === undefined,
+    pitch,
+  }));
+}
+
+function getStemBaseNotehead(
+  noteheads: ShapedPitchedNotehead[],
+  hasStem: boolean,
+  stemDirection: StemDirection,
+): ShapedPitchedNotehead | undefined {
+  if (!hasStem) {
+    return undefined;
+  }
+
+  return stemDirection === "up" ? noteheads[0] : noteheads.at(-1);
+}
+
+function getStemTipPitch(
+  sortedPitchOwnerships: ProjectedPitchOwnership[],
+  hasStem: boolean,
+  stemDirection: StemDirection,
+): number | undefined {
+  if (!hasStem) {
+    return undefined;
+  }
+
+  return stemDirection === "up"
+    ? sortedPitchOwnerships.at(-1)?.pitch
+    : sortedPitchOwnerships[0]?.pitch;
+}
+
+export function getPitchedEventNoteCenterX(
+  centerX: number,
+  duration: number,
+  layer: number,
+  pitchOwnerships: ProjectedPitchOwnership[],
+  pitch: number,
+): number {
+  const shapedEvent = shapePitchedEvent(duration, layer, pitchOwnerships);
+  const notehead = shapedEvent?.noteheads.find(
+    (candidateNotehead) => candidateNotehead.pitch === pitch,
+  );
+
+  return notehead === undefined
+    ? centerX
+    : centerX + staffSpacesToPx(notehead.centerOffsetStaffSpaces);
 }
 
 function buildPitchedEventGraphic(

@@ -32,6 +32,7 @@ import {
 } from "./spans";
 
 const EVENT_PITCH_WINDOW_PADDING = 1;
+const MIN_REST_LAYER_PITCH_DISTANCE = 12;
 const VISIBLE_PITCH_WINDOW_PADDING = 1;
 const DEFAULT_PITCH_WINDOW: PitchWindow = { maxPitch: 71, minPitch: 60 };
 
@@ -572,6 +573,7 @@ function getRestAnchorPitchBySegmentAndLayer(
       );
     });
 
+    enforceMinimumRestLayerPitchDistance(restAnchorPitchByLayer);
     restAnchorPitchBySegmentAndLayer.push(restAnchorPitchByLayer);
   });
 
@@ -583,6 +585,31 @@ function getLayerPitches(
   layer: EventLayer,
 ): number[] {
   return pitchesByLayer?.get(layer) ?? [];
+}
+
+function enforceMinimumRestLayerPitchDistance(
+  restAnchorPitchByLayer: Map<EventLayer, number>,
+): void {
+  const orderedLayers = [...restAnchorPitchByLayer.keys()].sort(
+    (left, right) => left - right,
+  );
+
+  if (orderedLayers.length < 2) {
+    return;
+  }
+
+  let previousPitch = restAnchorPitchByLayer.get(orderedLayers[0]!)!;
+
+  orderedLayers.slice(1).forEach((layer) => {
+    const currentPitch = restAnchorPitchByLayer.get(layer)!;
+    const constrainedPitch = Math.min(
+      currentPitch,
+      previousPitch - MIN_REST_LAYER_PITCH_DISTANCE,
+    );
+
+    restAnchorPitchByLayer.set(layer, constrainedPitch);
+    previousPitch = constrainedPitch;
+  });
 }
 
 function getNearestLayerAnchorPitch(

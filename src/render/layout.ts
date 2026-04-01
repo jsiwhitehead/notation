@@ -39,6 +39,11 @@ type LocalTimePosition = {
   x: number;
 };
 
+type LocalTimeLayout = {
+  timePositions: LocalTimePosition[];
+  width: number;
+};
+
 type RenderedSliceLayout = {
   endPx: number;
   gapBeforePx: number;
@@ -48,7 +53,7 @@ type RenderedSliceLayout = {
   startPx: number;
 };
 
-export type SliceFrame = {
+type SliceFrame = {
   bodyBounds: HorizontalBounds;
   endOffset: number;
   gapBeforePx: number;
@@ -64,6 +69,14 @@ const MAX_SYSTEM_WIDTH_PX = 1400;
 const MIN_TIME_POSITION_WEIGHT = 1;
 const SYSTEM_GAP_PX = 56;
 const TIME_POSITION_EDGE_WEIGHT = 1;
+const LOCAL_TIME_LAYOUTS_BY_RENDER_SEGMENT_LAYOUT = new WeakMap<
+  RenderSegmentLayout,
+  Map<ProjectionSegment["harmonicSlices"][number], LocalTimeLayout>
+>();
+const RENDERED_SLICE_LAYOUTS_BY_RENDER_SEGMENT_LAYOUT = new WeakMap<
+  RenderSegmentLayout,
+  RenderedSliceLayout[]
+>();
 
 export function buildPositionedGraphics<Graphic, PositionedGraphic>(
   graphics: Graphic[],
@@ -184,7 +197,7 @@ export function getRenderedHarmonicSliceBounds(
   return getSliceFrame(renderSegmentLayout, harmonicSlice).bodyBounds;
 }
 
-export function getSliceFrame(
+function getSliceFrame(
   renderSegmentLayout: RenderSegmentLayout,
   harmonicSlice: ProjectionSegment["harmonicSlices"][number],
 ): SliceFrame {
@@ -236,7 +249,7 @@ export function getRenderedEventCenterX(
   );
 }
 
-export function getSliceFrameByOffset(
+function getSliceFrameByOffset(
   renderSegmentLayout: RenderSegmentLayout,
   offset: number,
 ): SliceFrame | undefined {
@@ -253,26 +266,57 @@ export function getSliceFrameByOffset(
 function getRenderedSliceLayouts(
   renderSegmentLayout: RenderSegmentLayout,
 ): RenderedSliceLayout[] {
-  return renderSegmentLayout.segment.harmonicSlices.map(
+  const cachedRenderedSliceLayouts =
+    RENDERED_SLICE_LAYOUTS_BY_RENDER_SEGMENT_LAYOUT.get(renderSegmentLayout);
+
+  if (cachedRenderedSliceLayouts !== undefined) {
+    return cachedRenderedSliceLayouts;
+  }
+
+  const contentStartX = renderSegmentLayout.x;
+  const localTimeLayoutsByHarmonicSlice = getLocalTimeLayoutsByHarmonicSlice(
+    renderSegmentLayout,
+  );
+  const sliceWidthUnits = renderSegmentLayout.segment.harmonicSlices.map(
+    (harmonicSlice) =>
+      localTimeLayoutsByHarmonicSlice.get(harmonicSlice)?.width ?? 0,
+  );
+  const totalSliceWidthUnits = sliceWidthUnits.reduce(
+    (sum, width) => sum + width,
+    0,
+  );
+  const pxPerUnit =
+    totalSliceWidthUnits > 0
+      ? renderSegmentLayout.contentWidthPx / totalSliceWidthUnits
+      : 0;
+  let currentX = contentStartX;
+
+  const renderedSliceLayouts = renderSegmentLayout.segment.harmonicSlices.map(
     (harmonicSlice, index) => {
       const gapBeforePx = index === 0 ? 0 : SEGMENT_GAP_PX;
-      const canonicalStartX = harmonicSlice.startX;
-      const canonicalEndX = harmonicSlice.endX;
+      const widthPx = sliceWidthUnits[index]! * pxPerUnit;
+      const startPx = currentX + gapBeforePx;
+      const endPx = startPx + widthPx;
+
+      currentX = endPx;
 
       return {
-        endPx: getRenderedCanonicalX(renderSegmentLayout, canonicalEndX, index),
+        endPx,
         gapBeforePx,
         hasSegmentSeamBefore: false,
         harmonicSlice,
         index,
-        startPx: getRenderedCanonicalX(
-          renderSegmentLayout,
-          canonicalStartX,
-          index,
-        ),
+        startPx,
       };
     },
   );
+
+  RENDERED_SLICE_LAYOUTS_BY_RENDER_SEGMENT_LAYOUT.set(
+    renderSegmentLayout,
+    renderedSliceLayouts,
+  );
+
+  return renderedSliceLayouts;
 }
 
 function getRenderedSliceLayoutByOffset(
@@ -284,17 +328,13 @@ function getRenderedSliceLayoutByOffset(
   );
 }
 
-function getRenderedCanonicalX(
+function getSliceLocalTimeLayout(
   renderSegmentLayout: RenderSegmentLayout,
-  canonicalX: number,
-  sliceIndex: number,
-): number {
-  const contentStartX = renderSegmentLayout.x + SEGMENT_GAP_PX / 2;
-
+  harmonicSlice: ProjectionSegment["harmonicSlices"][number],
+): LocalTimeLayout {
   return (
-    contentStartX +
-    canonicalX * renderSegmentLayout.contentWidthPx +
-    Math.max(sliceIndex, 0) * SEGMENT_GAP_PX
+    getLocalTimeLayoutsByHarmonicSlice(renderSegmentLayout).get(harmonicSlice) ??
+    getEmptyLocalTimeLayout()
   );
 }
 
@@ -308,22 +348,27 @@ function mapOffsetIntoSliceFrame(
   }
 
   const localOffset = offset - sliceFrame.startOffset;
-  const localTimePositions = getLocalTimePositions(
+  const localTimeLayout = getSliceLocalTimeLayout(
     renderSegmentLayout,
     sliceFrame.harmonicSlice,
   );
   const localX = getLocalOffsetX(
-    localTimePositions,
+    localTimeLayout.timePositions,
     sliceFrame.harmonicSlice.duration,
+    localTimeLayout.width,
     localOffset,
   );
 
-  return sliceFrame.bodyBounds.x + localX * sliceFrame.bodyBounds.width;
+  return (
+    sliceFrame.bodyBounds.x +
+    localX * (sliceFrame.bodyBounds.width / localTimeLayout.width)
+  );
 }
 
 function getLocalOffsetX(
   timePositions: LocalTimePosition[],
   totalDuration: number,
+  totalWidth: number,
   offset: number,
 ): number {
   const exactTimePosition = timePositions.find(
@@ -339,7 +384,7 @@ function getLocalOffsetX(
   }
 
   if (offset >= totalDuration) {
-    return 1;
+    return totalWidth;
   }
 
   const previousTimePosition = [...timePositions]
@@ -351,7 +396,7 @@ function getLocalOffsetX(
   const previousOffset = previousTimePosition?.offset ?? 0;
   const previousX = previousTimePosition?.x ?? 0;
   const nextOffset = nextTimePosition?.offset ?? totalDuration;
-  const nextX = nextTimePosition?.x ?? 1;
+  const nextX = nextTimePosition?.x ?? totalWidth;
 
   if (nextOffset === previousOffset) {
     return previousX;
@@ -362,6 +407,85 @@ function getLocalOffsetX(
     ((offset - previousOffset) / (nextOffset - previousOffset)) *
       (nextX - previousX)
   );
+}
+
+function getEmptyLocalTimeLayout(): LocalTimeLayout {
+  return {
+    timePositions: [],
+    width: TIME_POSITION_EDGE_WEIGHT * 2,
+  };
+}
+
+function getLocalTimeLayoutsByHarmonicSlice(
+  renderSegmentLayout: RenderSegmentLayout,
+): Map<ProjectionSegment["harmonicSlices"][number], LocalTimeLayout> {
+  const cachedLocalTimeLayouts = LOCAL_TIME_LAYOUTS_BY_RENDER_SEGMENT_LAYOUT.get(
+    renderSegmentLayout,
+  );
+
+  if (cachedLocalTimeLayouts !== undefined) {
+    return cachedLocalTimeLayouts;
+  }
+
+  const localTimeLayouts = new Map(
+    renderSegmentLayout.segment.harmonicSlices.map((harmonicSlice) => [
+      harmonicSlice,
+      getLocalTimeLayout(harmonicSlice, renderSegmentLayout),
+    ]),
+  );
+
+  LOCAL_TIME_LAYOUTS_BY_RENDER_SEGMENT_LAYOUT.set(
+    renderSegmentLayout,
+    localTimeLayouts,
+  );
+
+  return localTimeLayouts;
+}
+
+function getLocalTimeLayout(
+  harmonicSlice: ProjectionSegment["harmonicSlices"][number],
+  renderSegmentLayout: RenderSegmentLayout,
+): LocalTimeLayout {
+  const timePositions = getLocalTimePositions(renderSegmentLayout, harmonicSlice);
+
+  if (timePositions.length === 0) {
+    return getEmptyLocalTimeLayout();
+  }
+
+  if (timePositions.length === 1) {
+    return {
+      timePositions: [{ ...timePositions[0]!, x: TIME_POSITION_EDGE_WEIGHT }],
+      width: TIME_POSITION_EDGE_WEIGHT * 2,
+    };
+  }
+
+  const intervalWeights = timePositions
+    .slice(0, -1)
+    .map((timePosition, index) =>
+      getLocalTimePositionIntervalWeight(
+        timePositions[index + 1]!.offset - timePosition.offset,
+        timePosition.maxDuration,
+        harmonicSlice.duration,
+      ),
+    );
+  const width =
+    TIME_POSITION_EDGE_WEIGHT * 2 +
+    intervalWeights.reduce((sum, weight) => sum + weight, 0);
+  let accumulatedWeight = TIME_POSITION_EDGE_WEIGHT;
+
+  return {
+    timePositions: timePositions.map((timePosition, index) => {
+      const positionedTimePosition = {
+        ...timePosition,
+        x: accumulatedWeight,
+      };
+
+      accumulatedWeight += intervalWeights[index] ?? 0;
+
+      return positionedTimePosition;
+    }),
+    width,
+  };
 }
 
 function getLocalTimePositions(
@@ -393,34 +517,7 @@ function getLocalTimePositions(
     return [];
   }
 
-  if (timePositions.length === 1) {
-    return [{ ...timePositions[0]!, x: 0.5 }];
-  }
-
-  const intervalWeights = timePositions
-    .slice(0, -1)
-    .map((timePosition, index) =>
-      getLocalTimePositionIntervalWeight(
-        timePositions[index + 1]!.offset - timePosition.offset,
-        timePosition.maxDuration,
-        harmonicSlice.duration,
-      ),
-    );
-  const spacingWeightTotal =
-    TIME_POSITION_EDGE_WEIGHT * 2 +
-    intervalWeights.reduce((sum, weight) => sum + weight, 0);
-  let accumulatedWeight = TIME_POSITION_EDGE_WEIGHT;
-
-  return timePositions.map((timePosition, index) => {
-    const positionedTimePosition = {
-      ...timePosition,
-      x: accumulatedWeight / spacingWeightTotal,
-    };
-
-    accumulatedWeight += intervalWeights[index] ?? 0;
-
-    return positionedTimePosition;
-  });
+  return timePositions;
 }
 
 function getLocalTimePositionIntervalWeight(

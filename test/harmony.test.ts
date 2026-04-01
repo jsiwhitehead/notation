@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test";
 
 import { normalizeChordSymbol } from "../src/harmony/chord";
-import { buildRegion, isBaselineValidRegion } from "../src/harmony/region";
+import {
+  buildRegion,
+  getRegionPitchClasses,
+  getRegionSpans,
+  isBaselineValidRegion,
+} from "../src/harmony/region";
 import { runEngine } from "../src/harmony";
 
 import type { HarmonicRegion, PieceInput, SegmentInput } from "../src/model";
@@ -131,46 +136,42 @@ function expectRegionPitchClasses(
   region: HarmonicRegion,
   pitchClasses: number[],
 ): void {
-  expect([...region.pitchClasses].sort((a, b) => a - b)).toEqual(
+  expect([...getRegionPitchClasses(region)].sort((a, b) => a - b)).toEqual(
     [...pitchClasses].sort((a, b) => a - b),
   );
 }
 
 describe("buildRegion", () => {
   test("derives canonical lanes for a diatonic two-span region", () => {
-    expect(buildRegion([0, 2, 4, 5, 7, 9, 11])).toMatchObject({
-      lanes: [
-        { end: 4, start: 0 },
-        { end: 11, start: 5 },
-      ],
-      pitchClasses: [0, 7, 2, 9, 4, 11, 5],
-    });
+    expectRegionPitchClasses(buildRegion([0, 2, 4, 5, 7, 9, 11]), [
+      0, 7, 2, 9, 4, 11, 5,
+    ]);
+    expect(getRegionSpans(buildRegion([0, 2, 4, 5, 7, 9, 11]))).toEqual([
+      { end: 4, start: 0 },
+      { end: 11, start: 5 },
+    ]);
   });
 
   test("derives canonical lanes for a paired fourth-chain region", () => {
-    expect(buildRegion([0, 7, 2, 9])).toMatchObject({
-      lanes: [
-        { end: 2, start: 0 },
-        { end: 9, start: 7 },
-      ],
-      pitchClasses: [0, 7, 2, 9],
-    });
+    expectRegionPitchClasses(buildRegion([0, 7, 2, 9]), [0, 7, 2, 9]);
+    expect(getRegionSpans(buildRegion([0, 7, 2, 9]))).toEqual([
+      { end: 2, start: 0 },
+      { end: 9, start: 7 },
+    ]);
   });
 
   test("keeps semitone-adjacent clusters as separate single-step lanes", () => {
-    expect(buildRegion([11, 0, 1])).toMatchObject({
-      lanes: [
-        { end: 0, start: 0 },
-        { end: 1, start: 1 },
-        { end: 11, start: 11 },
-      ],
-      pitchClasses: [0, 11, 1],
-    });
+    expectRegionPitchClasses(buildRegion([11, 0, 1]), [0, 11, 1]);
+    expect(getRegionSpans(buildRegion([11, 0, 1]))).toEqual([
+      { end: 0, start: 0 },
+      { end: 1, start: 1 },
+      { end: 11, start: 11 },
+    ]);
   });
 
   test("rejects paired lanes that overlap after octave repetition", () => {
     expect(isBaselineValidRegion([2, 9, 4, 11, 6, 1, 8, 3])).toBe(false);
-    expect(buildRegion([2, 9, 4, 11, 6, 1, 8, 3]).lanes).toEqual([
+    expect(getRegionSpans(buildRegion([2, 9, 4, 11, 6, 1, 8, 3]))).toEqual([
       { end: 2, start: 2 },
       { end: 3, start: 3 },
       { end: 8, start: 4 },
@@ -309,36 +310,36 @@ describe("runEngine", () => {
       expect(segment.grounding).toEqual({ ground: 7, root: 7 });
     });
 
-    test("keeps altered-fifth chord evidence as its direct local region", () => {
+    test("selects an expanded span cover for altered-fifth chord evidence", () => {
       const segment = getSingleSegment({
         chordSymbols: chordSymbolsAtStart("C7b5"),
         events: [],
       });
 
-      expectRegionPitchClasses(segment.center, [0, 4, 6, 10]);
-      expectRegionPitchClasses(segment.field, [0, 4, 6, 10]);
+      expectRegionPitchClasses(segment.center, [1, 3, 4, 6, 8, 10, 11]);
+      expectRegionPitchClasses(segment.field, [1, 3, 4, 6, 8, 10, 11]);
       expect(segment.grounding).toEqual({ ground: 0, root: 0 });
     });
 
-    test("treats augmented-triad evidence as invalid under the baseline two-span rule", () => {
+    test("selects a weighted span cover for augmented-triad evidence", () => {
       const segment = getSingleSegment({
         chordSymbols: chordSymbolsAtStart("Caug"),
         events: [],
       });
 
-      expectRegionPitchClasses(segment.center, []);
-      expectRegionPitchClasses(segment.field, []);
+      expectRegionPitchClasses(segment.center, [1, 4, 6, 8, 11]);
+      expectRegionPitchClasses(segment.field, [1, 4, 6, 8, 11]);
       expect(segment.grounding).toEqual({ ground: 0, root: 0 });
     });
 
-    test("treats diminished-seventh evidence as invalid when its paired lanes overlap", () => {
+    test("selects a weighted span cover for diminished-seventh evidence", () => {
       const segment = getSingleSegment({
         chordSymbols: chordSymbolsAtStart("Bdim7"),
         events: [],
       });
 
-      expectRegionPitchClasses(segment.center, []);
-      expectRegionPitchClasses(segment.field, []);
+      expectRegionPitchClasses(segment.center, [1, 3, 5, 6, 8, 10, 11]);
+      expectRegionPitchClasses(segment.field, [1, 3, 5, 6, 8, 10, 11]);
       expect(segment.grounding).toEqual({ ground: 11, root: 11 });
     });
 
@@ -356,7 +357,7 @@ describe("runEngine", () => {
       expect(segment.grounding).toBeUndefined();
     });
 
-    test("keeps a direct chromatic three-note cluster out of center and field", () => {
+    test("reduces a chromatic three-note cluster to the best-supported sparse cover", () => {
       const segment = getSingleSegment({
         events: [
           { duration: 1, pitch: 60, type: "note" },
@@ -365,12 +366,12 @@ describe("runEngine", () => {
         ],
       });
 
-      expectRegionPitchClasses(segment.center, []);
-      expectRegionPitchClasses(segment.field, []);
+      expectRegionPitchClasses(segment.center, [0, 2]);
+      expectRegionPitchClasses(segment.field, [0, 2]);
       expect(segment.grounding).toBeUndefined();
     });
 
-    test("keeps a longer direct chromatic run empty when filling would require overlapping paired lanes", () => {
+    test("selects a compact span cover inside a longer chromatic run", () => {
       const segment = getSingleSegment({
         events: [
           { duration: 1, pitch: 60, type: "note" },
@@ -380,8 +381,8 @@ describe("runEngine", () => {
         ],
       });
 
-      expectRegionPitchClasses(segment.center, []);
-      expectRegionPitchClasses(segment.field, []);
+      expectRegionPitchClasses(segment.center, [0, 2, 3, 5, 7]);
+      expectRegionPitchClasses(segment.field, [0, 2, 3, 5, 7]);
       expect(segment.grounding).toBeUndefined();
     });
 
@@ -420,25 +421,25 @@ describe("runEngine", () => {
       expect(segment.grounding).toEqual({ ground: 0, root: 0 });
     });
 
-    test("keeps suspended harmony from inventing third-quality content", () => {
+    test("allows suspended harmony to collapse to its non-singleton span support", () => {
       const segment = getSingleSegment({
         chordSymbols: chordSymbolsAtStart("Csus4"),
         events: [],
       });
 
-      expectRegionPitchClasses(segment.center, [0, 5, 7]);
-      expectRegionPitchClasses(segment.field, [0, 5, 7]);
+      expectRegionPitchClasses(segment.center, [5, 7]);
+      expectRegionPitchClasses(segment.field, [5, 7]);
       expect(segment.grounding).toEqual({ ground: 0, root: 0 });
     });
 
-    test("treats altered extension evidence as invalid when its paired lanes overlap", () => {
+    test("selects an expanded span cover for altered extension evidence", () => {
       const segment = getSingleSegment({
         chordSymbols: chordSymbolsAtStart("C7#11"),
         events: [],
       });
 
-      expectRegionPitchClasses(segment.center, []);
-      expectRegionPitchClasses(segment.field, []);
+      expectRegionPitchClasses(segment.center, [0, 2, 4, 6, 7, 9, 10]);
+      expectRegionPitchClasses(segment.field, [0, 2, 4, 6, 7, 9, 10]);
       expect(segment.grounding).toEqual({ ground: 0, root: 0 });
     });
 
@@ -492,7 +493,7 @@ describe("runEngine", () => {
       expect(segment.grounding).toBeUndefined();
     });
 
-    test("keeps a chromatic passing note inside the underlying local harmonic region", () => {
+    test("lets a chromatic passing note contract the selected local region", () => {
       const segment = getSingleSegment({
         events: [
           { duration: 1, offset: 0, pitch: 64, type: "note" },
@@ -503,12 +504,12 @@ describe("runEngine", () => {
         timeSignature: { beatType: 4, beats: 4 },
       });
 
-      expectRegionPitchClasses(segment.center, [0, 7, 2, 9, 4, 5]);
-      expectRegionPitchClasses(segment.field, [0, 7, 2, 9, 4, 5]);
+      expectRegionPitchClasses(segment.center, [0, 7, 2, 4, 5]);
+      expectRegionPitchClasses(segment.field, [0, 7, 2, 4, 5]);
       expect(segment.grounding).toBeUndefined();
     });
 
-    test("moves to a new local harmonic region when the following segment confirms the chromatic reinterpretation", () => {
+    test("keeps the contracted local region before a following reinterpretation", () => {
       const structure = runEngine({
         segments: [
           {
@@ -533,26 +534,26 @@ describe("runEngine", () => {
 
       expectRegionPitchClasses(
         structure.segments[0]!.center,
-        [0, 7, 2, 9, 4, 5],
+        [0, 7, 2, 4, 5],
       );
       expectRegionPitchClasses(
         structure.segments[0]!.field,
-        [0, 7, 2, 9, 4, 5],
+        [0, 7, 2, 4, 5],
       );
       expect(structure.segments[0]!.grounding).toBeUndefined();
       expectRegionPitchClasses(
         structure.segments[1]!.center,
-        [7, 2, 9, 4, 11, 6],
+        [7, 9, 4, 11, 6],
       );
       expectRegionPitchClasses(
         structure.segments[1]!.field,
-        [7, 2, 9, 4, 11, 6],
+        [7, 9, 4, 11, 6],
       );
       expect(structure.segments[1]!.grounding).toBeUndefined();
     });
   });
 
-  test("broadens field through continuity across adjacent centers", () => {
+  test("keeps field aligned with center across adjacent centers for now", () => {
     const structure = runEngine({
       segments: [
         {
@@ -577,12 +578,12 @@ describe("runEngine", () => {
     );
     expectRegionPitchClasses(structure.segments[2]!.center, [0, 7, 2, 9, 4]);
 
-    expectRegionPitchClasses(structure.segments[0]!.field, [0, 7, 2, 9, 4, 11]);
+    expectRegionPitchClasses(structure.segments[0]!.field, [0, 7, 2, 9, 4]);
     expectRegionPitchClasses(structure.segments[1]!.field, [0, 7, 2, 9, 4, 11]);
-    expectRegionPitchClasses(structure.segments[2]!.field, [0, 7, 2, 9, 4, 11]);
+    expectRegionPitchClasses(structure.segments[2]!.field, [0, 7, 2, 9, 4]);
   });
 
-  test("broadens field across a basic ii-V-I progression", () => {
+  test("keeps field aligned with center across a basic ii-V-I progression", () => {
     const structure = runEngine({
       segments: [
         {
@@ -610,21 +611,18 @@ describe("runEngine", () => {
       [0, 7, 2, 9, 4, 11],
     );
 
-    expectRegionPitchClasses(
-      structure.segments[0]!.field,
-      [5, 0, 7, 2, 9, 4, 11],
-    );
+    expectRegionPitchClasses(structure.segments[0]!.field, [5, 0, 7, 2, 9]);
     expectRegionPitchClasses(
       structure.segments[1]!.field,
       [5, 0, 7, 2, 9, 4, 11],
     );
     expectRegionPitchClasses(
       structure.segments[2]!.field,
-      [5, 0, 7, 2, 9, 4, 11],
+      [0, 7, 2, 9, 4, 11],
     );
   });
 
-  test("broadens field across a cadential V-I pair", () => {
+  test("keeps field aligned with center across a cadential V-I pair", () => {
     const structure = runEngine({
       segments: [
         {
@@ -653,11 +651,11 @@ describe("runEngine", () => {
     );
     expectRegionPitchClasses(
       structure.segments[1]!.field,
-      [5, 0, 7, 2, 9, 4, 11],
+      [0, 7, 2, 9, 4, 11],
     );
   });
 
-  test("broadens field across a ii-V pair without requiring tonic arrival", () => {
+  test("keeps field aligned with center across a ii-V pair", () => {
     const structure = runEngine({
       segments: [
         {
@@ -677,17 +675,14 @@ describe("runEngine", () => {
       [5, 0, 7, 2, 9, 4, 11],
     );
 
-    expectRegionPitchClasses(
-      structure.segments[0]!.field,
-      [5, 0, 7, 2, 9, 4, 11],
-    );
+    expectRegionPitchClasses(structure.segments[0]!.field, [5, 0, 7, 2, 9]);
     expectRegionPitchClasses(
       structure.segments[1]!.field,
       [5, 0, 7, 2, 9, 4, 11],
     );
   });
 
-  test("keeps a deceptive ii-V-vi less unified than a ii-V-I while still broadening through the dominant", () => {
+  test("keeps field aligned with center across a deceptive ii-V-vi", () => {
     const structure = runEngine({
       segments: [
         {
@@ -712,17 +707,14 @@ describe("runEngine", () => {
     );
     expectRegionPitchClasses(structure.segments[2]!.center, [0, 7, 2, 9, 4]);
 
-    expectRegionPitchClasses(
-      structure.segments[0]!.field,
-      [5, 0, 7, 2, 9, 4, 11],
-    );
+    expectRegionPitchClasses(structure.segments[0]!.field, [5, 0, 7, 2, 9]);
     expectRegionPitchClasses(
       structure.segments[1]!.field,
       [5, 0, 7, 2, 9, 4, 11],
     );
     expectRegionPitchClasses(
       structure.segments[2]!.field,
-      [5, 0, 7, 2, 9, 4, 11],
+      [0, 7, 2, 9, 4],
     );
   });
 
@@ -803,12 +795,12 @@ describe("runEngine", () => {
 
     expect(structure.segments[0]!.harmonicSlices).toHaveLength(2);
     expect(structure.segments[0]!.harmonicSlices[0]).toMatchObject({
-      duration: 3.5,
+      duration: 3.75,
       startOffset: 0,
     });
     expect(structure.segments[0]!.harmonicSlices[1]).toMatchObject({
-      duration: 0.5,
-      startOffset: 3.5,
+      duration: 0.25,
+      startOffset: 3.75,
     });
     expectRegionPitchClasses(
       structure.segments[0]!.harmonicSlices[0]!.harmonic.center,
@@ -820,11 +812,11 @@ describe("runEngine", () => {
     );
     expectRegionPitchClasses(
       structure.segments[0]!.harmonicSlices[1]!.harmonic.center,
-      [0, 7, 2, 9, 4, 11, 6],
+      [0, 6],
     );
     expectRegionPitchClasses(
       structure.segments[0]!.harmonicSlices[1]!.harmonic.field,
-      [0, 7, 2, 9, 4, 11, 6],
+      [0, 6],
     );
   });
 

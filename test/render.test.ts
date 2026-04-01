@@ -3,6 +3,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 import { buildRegion } from "../src/harmony/region";
 import type { ProjectionEvent } from "../src/projection";
+import { renderNotationSvg } from "../src/render";
 import { buildBeamGroups } from "../src/render/beams";
 import {
   getDurationDotCount,
@@ -11,6 +12,7 @@ import {
 import { appendProjectedSegmentEvents } from "../src/render/events";
 import {
   appendProjectedSegmentRegions,
+  flattenColorOverWhite,
   regionToColor,
   regionToWheel24,
   wheel24ToDarkColor,
@@ -73,8 +75,11 @@ function projectedSpan(
   start: number,
   end: number,
   options: {
-    next?: { end: number; start: number };
-    prev?: { end: number; start: number };
+    join?: Array<{
+      end: number;
+      start: number;
+      targetInsetDirection: "down" | "none" | "up";
+    }>;
   } = {},
 ) {
   return {
@@ -133,6 +138,12 @@ function renderSegmentEvents(renderSegmentLayout: RenderSegmentLayout): {
   return { fillGroup, inkGroup };
 }
 
+function createProjectionSegment(
+  segment: RenderSegmentLayout["segment"],
+): import("../src/projection").Projection["segments"][number] {
+  return segment;
+}
+
 function getPathDataByFill(group: SVGGElement, fill: string): string[] {
   return [...group.querySelectorAll("path")]
     .filter((path) => path.getAttribute("fill") === fill)
@@ -189,7 +200,8 @@ function getOutOfFieldLines(group: SVGGElement): SVGLineElement[] {
   return [...group.querySelectorAll("line")].filter(
     (line) =>
       line.getAttribute("y1") === line.getAttribute("y2") &&
-      Number(line.getAttribute("stroke-width")) === OUT_OF_FIELD_MARK_STROKE_WIDTH_PX,
+      Number(line.getAttribute("stroke-width")) ===
+        OUT_OF_FIELD_MARK_STROKE_WIDTH_PX,
   );
 }
 
@@ -358,9 +370,9 @@ describe("appendProjectedSegmentRegions", () => {
 
     const { apexX, leftX, rightX } = getNotchMetrics(notchPath!);
 
-    expect(leftX).toBe(250);
-    expect(rightX).toBe(280);
-    expect(apexX).toBe(266.2);
+    expect(leftX).toBe(185);
+    expect(rightX).toBe(215);
+    expect(apexX).toBe(201.2);
   });
 
   test("only creates notches from events inside the current slice", () => {
@@ -420,22 +432,42 @@ describe("appendProjectedSegmentRegions", () => {
 
     const { apexX } = getNotchMetrics(notchPaths[0]!);
 
-    expect(apexX).toBe(266.2);
+    expect(apexX).toBe(201.2);
   });
 
-  test("renders joins across internal slice boundaries", () => {
+  test("keeps spans flat across internal slice boundaries", () => {
     const group = renderSegmentRegions(
       createRenderSegmentLayout({
         events: [],
         harmonicSlices: [
           {
             center: {
-              spans: [projectedSpan(60, 62, { next: { end: 64, start: 62 } })],
+              spans: [
+                projectedSpan(60, 62, {
+                  join: [
+                    {
+                      end: 64,
+                      start: 62,
+                      targetInsetDirection: "none",
+                    },
+                  ],
+                }),
+              ],
             },
             duration: 1,
             endX: 0.5,
             field: {
-              spans: [projectedSpan(60, 62, { next: { end: 64, start: 62 } })],
+              spans: [
+                projectedSpan(60, 62, {
+                  join: [
+                    {
+                      end: 64,
+                      start: 62,
+                      targetInsetDirection: "none",
+                    },
+                  ],
+                }),
+              ],
             },
             harmonic: {
               center: region([0, 2]),
@@ -449,12 +481,12 @@ describe("appendProjectedSegmentRegions", () => {
           },
           {
             center: {
-              spans: [projectedSpan(62, 64, { prev: { end: 62, start: 60 } })],
+              spans: [projectedSpan(62, 64)],
             },
             duration: 1,
             endX: 1,
             field: {
-              spans: [projectedSpan(62, 64, { prev: { end: 62, start: 60 } })],
+              spans: [projectedSpan(62, 64)],
             },
             harmonic: {
               center: region([0, 2]),
@@ -480,16 +512,16 @@ describe("appendProjectedSegmentRegions", () => {
 
     expect(joinedPaths).toHaveLength(2);
     expect(
-      joinedPaths.some((pathData) => pathData.includes("L 215 131.5 C")),
-    ).toBe(true);
-    expect(
-      joinedPaths.some((pathData) =>
-        pathData.includes("M 230 128.5 C 232.625 127 235.25 125.5 245 125.5 L"),
+      joinedPaths.some(
+        (pathData) =>
+          pathData ===
+          "M 100 131.5 L 200 131.5 L 200 134.5 L 100 134.5 Z M 200 125.5 L 210 125.5 L 210 128.5 L 200 128.5 Z",
       ),
     ).toBe(true);
     expect(
-      joinedPaths.some((pathData) =>
-        pathData.includes("L 215 131.5 C 224.75 131.5 227.375 130 230 128.5"),
+      joinedPaths.some(
+        (pathData) =>
+          pathData === "M 210 125.5 L 310 125.5 L 310 128.5 L 210 128.5 Z",
       ),
     ).toBe(true);
   });
@@ -541,7 +573,7 @@ describe("appendProjectedSegmentRegions", () => {
 });
 
 describe("appendProjectedSegmentEvents", () => {
-  test("shifts event x positions out of internal slice join gaps", () => {
+  test("keeps adjacent slice event x positions continuous", () => {
     const { fillGroup } = renderSegmentEvents(
       createRenderSegmentLayout({
         events: [
@@ -611,7 +643,7 @@ describe("appendProjectedSegmentEvents", () => {
 
     expect(firstOriginX).toBeDefined();
     expect(secondOriginX).toBeDefined();
-    expect(secondOriginX! - firstOriginX!).toBeCloseTo(130, 6);
+    expect(secondOriginX! - firstOriginX!).toBeCloseTo(110, 6);
   });
 
   test("keeps a single-slice segment event centered in the flat body", () => {
@@ -655,7 +687,7 @@ describe("appendProjectedSegmentEvents", () => {
       .filter((transform): transform is string => transform !== null);
 
     expect(transforms).toHaveLength(1);
-    expect(getTranslateX(transforms[0]!)).toBeCloseTo(209.01792452830188, 6);
+    expect(getTranslateX(transforms[0]!)).toBeCloseTo(194.01792452830188, 6);
   });
 
   test("positions short later-slice events within that slice instead of clamping to its start", () => {
@@ -727,7 +759,7 @@ describe("appendProjectedSegmentEvents", () => {
     const [firstOriginX, secondOriginX] = transforms.map(getTranslateX);
 
     expect(secondOriginX).toBeGreaterThan(firstOriginX! + 5);
-    expect(firstOriginX!).toBeGreaterThan(233);
+    expect(firstOriginX!).toBeGreaterThan(200);
   });
 
   test("draws a short horizontal mark through noteheads outside the field", () => {
@@ -775,6 +807,124 @@ describe("appendProjectedSegmentEvents", () => {
       Number(outOfFieldLines[0]?.getAttribute("x2")) -
         Number(outOfFieldLines[0]?.getAttribute("x1")),
     ).toBeCloseTo(OUT_OF_FIELD_MARK_WIDTH_PX, 6);
+  });
+});
+
+describe("renderNotationSvg", () => {
+  test("renders joined center spans as single filled paths across slice and segment boundaries", () => {
+    const svg = renderNotationSvg({
+      maxPitch: 72,
+      minPitch: 58,
+      segments: [
+        createProjectionSegment({
+          events: [],
+          harmonicSlices: [
+            {
+              center: {
+                spans: [
+                  projectedSpan(60, 64, {
+                    join: [
+                      {
+                        end: 64,
+                        start: 64,
+                        targetInsetDirection: "down",
+                      },
+                    ],
+                  }),
+                ],
+              },
+              duration: 1,
+              endX: 0.5,
+              field: { spans: [] },
+              harmonic: {
+                center: region([0, 2]),
+                field: region([0, 2]),
+              },
+              projectedGroundingMarks: undefined,
+              startOffset: 0,
+              startX: 0,
+              touchesSegmentEnd: false,
+              touchesSegmentStart: true,
+            },
+            {
+              center: {
+                spans: [
+                  projectedSpan(64, 68, {
+                    join: [
+                      {
+                        end: 68,
+                        start: 66,
+                        targetInsetDirection: "none",
+                      },
+                    ],
+                  }),
+                ],
+              },
+              duration: 1,
+              endX: 1,
+              field: { spans: [] },
+              harmonic: {
+                center: region([0, 2]),
+                field: region([0, 2]),
+              },
+              projectedGroundingMarks: undefined,
+              startOffset: 1,
+              startX: 0.5,
+              touchesSegmentEnd: true,
+              touchesSegmentStart: false,
+            },
+          ],
+          index: 0,
+          visibleDefaults: { restAnchorPitch: 60 },
+          segmentWidthUnits: 25,
+          timePositions: [],
+          timeSignature: undefined,
+          totalDuration: 2,
+        }),
+        createProjectionSegment({
+          events: [],
+          harmonicSlices: [
+            {
+              center: { spans: [projectedSpan(66, 70)] },
+              duration: 1,
+              endX: 1,
+              field: { spans: [] },
+              harmonic: {
+                center: region([0, 2]),
+                field: region([0, 2]),
+              },
+              projectedGroundingMarks: undefined,
+              startOffset: 0,
+              startX: 0,
+              touchesSegmentEnd: true,
+              touchesSegmentStart: true,
+            },
+          ],
+          index: 1,
+          visibleDefaults: { restAnchorPitch: 60 },
+          segmentWidthUnits: 25,
+          timePositions: [],
+          timeSignature: undefined,
+          totalDuration: 1,
+        }),
+      ],
+    });
+
+    const baseCenterFill = flattenColorOverWhite(
+      regionToColor([0, 2]) ?? "#111111",
+      0.4,
+    );
+    const markerPaths = [...svg.querySelectorAll("path")]
+      .filter((path) => path.getAttribute("fill") === baseCenterFill)
+      .map((path) => path.getAttribute("d"))
+      .filter((pathData): pathData is string => pathData !== null);
+
+    expect(markerPaths).toContain(
+      "M 28 125.5 L 128 125.5 L 128 134.5 L 28 134.5 Z M 128 125.5 L 138 121 L 138 122.5 L 128 127 Z",
+    );
+    expect(markerPaths).toContain(
+      "M 138 113.5 L 238 113.5 L 238 122.5 L 138 122.5 Z M 238 113.5 L 248 113.5 L 248 116.5 L 238 116.5 Z",
+    );
   });
 });
 

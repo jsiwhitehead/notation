@@ -1,10 +1,10 @@
 import { getEngravingDefaults, getGlyphBox } from "./smufl";
 
 export const PITCH_STEP_HEIGHT_PX = 3;
-export const NOTEHEAD_HEIGHT_PX = 8.5;
+const NOTEHEAD_HEIGHT_PX = 8.5;
 export const HORIZONTAL_PADDING_PX = 28;
 export const VERTICAL_PADDING_PX = 100;
-export const SEGMENT_GAP_PX = 30;
+export const SEGMENT_GAP_PX = 10;
 
 const ENGRAVING_DEFAULTS = getEngravingDefaults();
 const NOTEHEAD_BLACK_BOX = getGlyphBox("noteheadBlack");
@@ -19,17 +19,15 @@ export const SEGMENT_SEAM_PX = staffSpacesToPx(
   ENGRAVING_DEFAULTS.thinBarlineThickness,
 );
 const LAYOUT_UNIT_PX = 8;
-export const JOIN_CURVE_CONTROL_X_RATIO = 0.65;
 export const INK_COLOR = "#111111";
 export const BAR_NUMBER_GAP_PX = 12;
 export const BAR_NUMBER_FONT_SIZE_PX = 12;
 export const GROUNDING_MARK_HEIGHT_PX = 3;
 export const GROUNDING_MARK_WIDTH_PX = 10;
-export const OUT_OF_FIELD_MARK_WIDTH_PX =
-  staffSpacesToPx(
-    NOTEHEAD_BLACK_WIDTH_STAFF_SPACES +
-      ENGRAVING_DEFAULTS.legerLineExtension * 2.6,
-  );
+export const OUT_OF_FIELD_MARK_WIDTH_PX = staffSpacesToPx(
+  NOTEHEAD_BLACK_WIDTH_STAFF_SPACES +
+    ENGRAVING_DEFAULTS.legerLineExtension * 2.6,
+);
 export const OUT_OF_FIELD_MARK_STROKE_WIDTH_PX = 3;
 export const SINGLE_PITCH_SPAN_HEIGHT_PX = 1.5;
 const SPAN_CLEARANCE_PX = 0.25;
@@ -40,6 +38,7 @@ export const CENTER_SPAN_NOTCH_HALF_WIDTH_PX = 15;
 export const CENTER_SPAN_NOTCH_CONTROL_X_RATIO = 0.5;
 export const CENTER_SPAN_NOTCH_HEIGHT_EXTENSION_PX = 1;
 export const CENTER_SPAN_NOTCH_APEX_X_OFFSET_PX = 1.2;
+export const CENTER_SPAN_NOTCH_BASE_OUTSET_PX = 1;
 
 export function getYForPitch(maxPitch: number, pitch: number): number {
   return VERTICAL_PADDING_PX + (maxPitch - pitch) * PITCH_STEP_HEIGHT_PX;

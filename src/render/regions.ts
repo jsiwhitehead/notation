@@ -1,5 +1,11 @@
+import { getRegionPitchClasses } from "../harmony/region";
 import { sliceContainsOffset } from "../projection";
-import type { ProjectedSpan, Span } from "../projection/spans";
+import { getPitchedEventNoteCenterX } from "./events";
+import type {
+  JoinInsetDirection,
+  ProjectedSpan,
+  Span,
+} from "../projection/spans";
 import {
   appendPositionedGraphics,
   buildPositionedGraphics,
@@ -10,12 +16,12 @@ import {
 } from "./layout";
 import {
   CENTER_SPAN_NOTCH_APEX_X_OFFSET_PX,
+  CENTER_SPAN_NOTCH_BASE_OUTSET_PX,
   CENTER_SPAN_NOTCH_CONTROL_X_RATIO,
   CENTER_SPAN_NOTCH_HEIGHT_EXTENSION_PX,
   CENTER_SPAN_NOTCH_HALF_WIDTH_PX,
   GROUNDING_MARK_HEIGHT_PX,
   GROUNDING_MARK_WIDTH_PX,
-  JOIN_CURVE_CONTROL_X_RATIO,
   getYForPitch,
   PITCH_STEP_HEIGHT_PX,
   SEGMENT_GAP_PX,
@@ -80,11 +86,6 @@ const HARMONIC_WHEEL_24_DARK = [
   "#df194a",
 ] as const;
 
-type Point = {
-  x: number;
-  y: number;
-};
-
 type SpanRect = {
   bottom: number;
   height: number;
@@ -116,7 +117,6 @@ type SpanRegionGraphic = {
   bounds: HorizontalBounds;
   nextJoinGapPx: number;
   paint: RegionPaint;
-  prevJoinGapPx: number;
   projectedSpan: ProjectedSpan;
   type: "span";
 };
@@ -157,8 +157,6 @@ type PositionedGroundMarkGraphic = {
   y: number;
   type: "ground";
 };
-
-type CubicCurve = [Point, Point, Point, Point];
 
 type CenterSpanNotchEdges = {
   bottom: boolean;
@@ -246,11 +244,6 @@ type SpanNotchGeometry = {
 
 type HighlightStrength = "base" | "mid" | "strong";
 
-type SuppressedNotchEdges = {
-  bottom: Set<number>;
-  top: Set<number>;
-};
-
 export function regionToWheel24(
   pitchClasses: PitchClass[],
 ): number | undefined {
@@ -320,7 +313,6 @@ type SliceGeometryContext = {
   nextJoinGapPx: number;
   notchSets: CenterSpanNotchSets;
   pitchedEvents: PitchedRenderEvent[];
-  prevJoinGapPx: number;
   sliceBounds: HorizontalBounds;
 };
 
@@ -328,6 +320,16 @@ function getCenterDarkColor(centerPitchClasses: number[]): string {
   const wheelIndex = regionToWheel24(centerPitchClasses);
 
   return wheelIndex === undefined ? "#111111" : wheel24ToDarkColor(wheelIndex);
+}
+
+function getSpanPitchClasses(span: Span): PitchClass[] {
+  const pitchClasses: PitchClass[] = [];
+
+  for (let pitch = span.start; pitch <= span.end; pitch += 2) {
+    pitchClasses.push(mod(pitch, 12));
+  }
+
+  return pitchClasses;
 }
 
 function isDrawableSpanRect(rect: SpanRect): boolean {
@@ -368,209 +370,114 @@ function appendProjectedSpan(
 function getProjectedSpanPath(
   maxPitch: number,
   nextJoinGapPx: number,
-  prevJoinGapPx: number,
   bounds: HorizontalBounds,
   projectedSpan: ProjectedSpan,
 ): string | undefined {
-  const nextJoinExtension = nextJoinGapPx / 2;
-  const prevJoinExtension = prevJoinGapPx / 2;
   const currentRect = getSpanRect(maxPitch, projectedSpan);
 
   if (!isDrawableSpanRect(currentRect)) {
     return undefined;
   }
 
-  const prevHalf =
-    projectedSpan.prev === undefined
-      ? undefined
-      : getJoinHalf(
-          maxPitch,
-          prevJoinGapPx,
-          bounds,
-          projectedSpan,
-          projectedSpan.prev,
-          "prev",
-        );
-  const nextHalf =
-    projectedSpan.next === undefined
-      ? undefined
-      : getJoinHalf(
-          maxPitch,
-          nextJoinGapPx,
-          bounds,
-          projectedSpan,
-          projectedSpan.next,
-          "next",
-        );
-  const leftX =
-    bounds.x - (projectedSpan.prev === undefined ? prevJoinExtension : 0);
-  const rightX =
-    bounds.x +
-    bounds.width +
-    (projectedSpan.next === undefined ? nextJoinExtension : 0);
-
-  return [
-    prevHalf === undefined
-      ? `M ${leftX} ${currentRect.top}`
-      : `M ${prevHalf.midTop.x} ${prevHalf.midTop.y}`,
-    ...(prevHalf === undefined
-      ? []
-      : [getHalfCubicCommand(prevHalf.top, "prev", "top")]),
+  const leftX = bounds.x;
+  const rightX = bounds.x + bounds.width;
+  const pathSegments = [[
+    `M ${leftX} ${currentRect.top}`,
     `L ${rightX} ${currentRect.top}`,
-    ...(nextHalf === undefined
-      ? []
-      : [getHalfCubicCommand(nextHalf.top, "next", "top")]),
-    nextHalf === undefined
-      ? `L ${rightX} ${currentRect.bottom}`
-      : `L ${nextHalf.midBottom.x} ${nextHalf.midBottom.y}`,
-    ...(nextHalf === undefined
-      ? []
-      : [getHalfCubicCommand(nextHalf.bottom, "next", "bottom")]),
+    `L ${rightX} ${currentRect.bottom}`,
     `L ${leftX} ${currentRect.bottom}`,
-    ...(prevHalf === undefined
-      ? []
-      : [getHalfCubicCommand(prevHalf.bottom, "prev", "bottom")]),
     "Z",
-  ].join(" ");
-}
+  ].join(" ")];
 
-function splitCubicAtHalf(curve: CubicCurve): {
-  left: CubicCurve;
-  right: CubicCurve;
-} {
-  const startControl = midpoint(curve[0], curve[1]);
-  const innerControl = midpoint(curve[1], curve[2]);
-  const endControl = midpoint(curve[2], curve[3]);
-  const leftControl = midpoint(startControl, innerControl);
-  const rightControl = midpoint(innerControl, endControl);
-  const middle = midpoint(leftControl, rightControl);
-
-  return {
-    left: [curve[0], startControl, leftControl, middle],
-    right: [middle, rightControl, endControl, curve[3]],
-  };
-}
-
-function midpoint(left: Point, right: Point): Point {
-  return {
-    x: (left.x + right.x) / 2,
-    y: (left.y + right.y) / 2,
-  };
-}
-
-function getHalfCubicCommand(
-  halfCurve: CubicCurve,
-  direction: "next" | "prev",
-  edge: "bottom" | "top",
-): string {
-  if (direction === "next") {
-    if (edge === "top") {
-      return `C ${halfCurve[1].x} ${halfCurve[1].y} ${halfCurve[2].x} ${halfCurve[2].y} ${halfCurve[3].x} ${halfCurve[3].y}`;
+  projectedSpan.join?.forEach((join) => {
+    if (nextJoinGapPx <= 0) {
+      return;
     }
 
-    return `C ${halfCurve[2].x} ${halfCurve[2].y} ${halfCurve[1].x} ${halfCurve[1].y} ${halfCurve[0].x} ${halfCurve[0].y}`;
-  }
+    if (join.start === join.end) {
+      const leftCenterY = getSpanJoinEdgeCenterY(
+        maxPitch,
+        projectedSpan,
+        join.start,
+      );
+      const rightCenterY = getJoinTargetCenterY(
+        join.targetInsetDirection,
+        maxPitch,
+        join.start,
+      );
+      const halfHeight = SINGLE_PITCH_SPAN_HEIGHT_PX / 2;
 
-  if (edge === "top") {
-    return `C ${halfCurve[1].x} ${halfCurve[1].y} ${halfCurve[2].x} ${halfCurve[2].y} ${halfCurve[3].x} ${halfCurve[3].y}`;
-  }
+      pathSegments.push(
+        [
+          `M ${rightX} ${leftCenterY - halfHeight}`,
+          `L ${rightX + nextJoinGapPx} ${rightCenterY - halfHeight}`,
+          `L ${rightX + nextJoinGapPx} ${rightCenterY + halfHeight}`,
+          `L ${rightX} ${leftCenterY + halfHeight}`,
+          "Z",
+        ].join(" "),
+      );
+      return;
+    }
 
-  return `C ${halfCurve[2].x} ${halfCurve[2].y} ${halfCurve[1].x} ${halfCurve[1].y} ${halfCurve[0].x} ${halfCurve[0].y}`;
+    const joinRect = getSpanRect(maxPitch, join);
+
+    if (!isDrawableSpanRect(joinRect)) {
+      return;
+    }
+
+    pathSegments.push(
+      [
+        `M ${rightX} ${joinRect.top}`,
+        `L ${rightX + nextJoinGapPx} ${joinRect.top}`,
+        `L ${rightX + nextJoinGapPx} ${joinRect.bottom}`,
+        `L ${rightX} ${joinRect.bottom}`,
+        "Z",
+      ].join(" "),
+    );
+  });
+
+  return pathSegments.join(" ");
 }
 
-function getJoinHalf(
+function getSpanJoinEdgeCenterY(
   maxPitch: number,
-  gapPx: number,
-  bounds: HorizontalBounds,
-  currentSpan: Span,
-  joinedSpan: Span,
-  direction: "next" | "prev",
-):
-  | {
-      bottom: CubicCurve;
-      midBottom: Point;
-      midTop: Point;
-      top: CubicCurve;
-    }
-  | undefined {
-  const fullJoinCurves = getFullJoinCurves(
-    maxPitch,
-    gapPx,
-    bounds,
-    currentSpan,
-    joinedSpan,
-    direction,
-  );
+  span: Span,
+  pitch: number,
+): number {
+  const halfHeight = SINGLE_PITCH_SPAN_HEIGHT_PX / 2;
 
-  if (fullJoinCurves === undefined) {
-    return undefined;
+  if (span.start === span.end) {
+    return getYForPitch(maxPitch, pitch);
   }
 
-  const { bottomCurve, topCurve } = fullJoinCurves;
-  const topHalf = splitCubicAtHalf(topCurve);
-  const bottomHalf = splitCubicAtHalf(bottomCurve);
-
-  if (direction === "next") {
-    return {
-      bottom: bottomHalf.left,
-      midBottom: bottomHalf.left[3],
-      midTop: topHalf.left[3],
-      top: topHalf.left,
-    };
+  if (pitch === span.start) {
+    return getYForPitch(maxPitch, span.start) - SPAN_EVENT_CLEARANCE_PX - halfHeight;
   }
 
-  return {
-    bottom: bottomHalf.right,
-    midBottom: bottomHalf.right[0],
-    midTop: topHalf.right[0],
-    top: topHalf.right,
-  };
+  if (pitch === span.end) {
+    return getYForPitch(maxPitch, span.end) + SPAN_EVENT_CLEARANCE_PX + halfHeight;
+  }
+
+  return getYForPitch(maxPitch, pitch);
 }
 
-function getFullJoinCurves(
+function getJoinTargetCenterY(
+  targetInsetDirection: JoinInsetDirection,
   maxPitch: number,
-  gapPx: number,
-  bounds: HorizontalBounds,
-  currentSpan: Span,
-  joinedSpan: Span,
-  direction: "next" | "prev",
-):
-  | {
-      bottomCurve: CubicCurve;
-      topCurve: CubicCurve;
-    }
-  | undefined {
-  const currentRect = getSpanRect(maxPitch, currentSpan);
-  const joinedRect = getSpanRect(maxPitch, joinedSpan);
+  pitch: number,
+): number {
+  const halfHeight = SINGLE_PITCH_SPAN_HEIGHT_PX / 2;
+  const centerY = getYForPitch(maxPitch, pitch);
 
-  if (!isDrawableSpanRect(currentRect) || !isDrawableSpanRect(joinedRect)) {
-    return undefined;
+  if (targetInsetDirection === "up") {
+    return centerY + SPAN_EVENT_CLEARANCE_PX + halfHeight;
   }
 
-  const currentEdgeX =
-    direction === "next" ? bounds.x + bounds.width : bounds.x;
-  const joinedEdgeX = currentEdgeX + (direction === "next" ? gapPx : -gapPx);
-  const leftX = Math.min(currentEdgeX, joinedEdgeX);
-  const rightX = Math.max(currentEdgeX, joinedEdgeX);
-  const leftRect = currentEdgeX <= joinedEdgeX ? currentRect : joinedRect;
-  const rightRect = currentEdgeX <= joinedEdgeX ? joinedRect : currentRect;
-  const joinControlX = gapPx * JOIN_CURVE_CONTROL_X_RATIO;
-  const fullTopCurve: CubicCurve = [
-    { x: leftX, y: leftRect.top },
-    { x: leftX + joinControlX, y: leftRect.top },
-    { x: rightX - joinControlX, y: rightRect.top },
-    { x: rightX, y: rightRect.top },
-  ];
-  const fullBottomCurve: CubicCurve = [
-    { x: leftX, y: leftRect.bottom },
-    { x: leftX + joinControlX, y: leftRect.bottom },
-    { x: rightX - joinControlX, y: rightRect.bottom },
-    { x: rightX, y: rightRect.bottom },
-  ];
-  return {
-    bottomCurve: fullBottomCurve,
-    topCurve: fullTopCurve,
-  };
+  if (targetInsetDirection === "down") {
+    return centerY - SPAN_EVENT_CLEARANCE_PX - halfHeight;
+  }
+
+  return centerY;
 }
 
 function getFieldPaint(): RegionPaint {
@@ -600,6 +507,30 @@ function getCenterPaint(
   };
 }
 
+function getCenterSpanHighlightStrength(
+  projectedSpan: ProjectedSpan,
+  globalHighlightPitch: number | undefined,
+): HighlightStrength {
+  if (globalHighlightPitch === undefined) {
+    return "base";
+  }
+
+  if (spanContainsPitch(projectedSpan, globalHighlightPitch)) {
+    return "strong";
+  }
+
+  return spanContainsPitchClass(projectedSpan, mod(globalHighlightPitch, 12))
+    ? "mid"
+    : "base";
+}
+
+function getResolvedCenterSpanColor(
+  centerColor: string | undefined,
+  projectedSpan: ProjectedSpan,
+): string {
+  return centerColor ?? regionToColor(getSpanPitchClasses(projectedSpan)) ?? "#111111";
+}
+
 function spanContainsPitch(span: Span, pitch: number): boolean {
   return (
     pitch >= span.start && pitch <= span.end && (pitch - span.start) % 2 === 0
@@ -626,20 +557,26 @@ function appendCenterSpanNotches(
 ): NotchRegionGraphic[] {
   const spanRect = getSpanRect(maxPitch, projectedSpan);
   const notchGraphics: NotchRegionGraphic[] = [];
-  const suppressedNotchEdges = getSuppressedInternalNotchEdges(pitchedEvents);
 
   if (!isDrawableSpanRect(spanRect)) {
     return notchGraphics;
   }
 
   pitchedEvents.forEach((event) => {
-    const centerX = getRenderedEventCenterX(renderSegmentLayout, event);
+    const eventCenterX = getRenderedEventCenterX(renderSegmentLayout, event);
 
     event.pitches.forEach((pitch) => {
+      const centerX = getPitchedEventNoteCenterX(
+        eventCenterX,
+        event.duration,
+        event.layer,
+        event.pitchOwnerships,
+        pitch,
+      );
+
       if (
         pitch === projectedSpan.end &&
-        notchEdges.top &&
-        !suppressedNotchEdges.top.has(pitch)
+        notchEdges.top
       ) {
         notchGraphics.push({
           centerX,
@@ -653,8 +590,7 @@ function appendCenterSpanNotches(
 
       if (
         pitch === projectedSpan.start &&
-        notchEdges.bottom &&
-        !suppressedNotchEdges.bottom.has(pitch)
+        notchEdges.bottom
       ) {
         notchGraphics.push({
           centerX,
@@ -669,34 +605,6 @@ function appendCenterSpanNotches(
   });
 
   return notchGraphics;
-}
-
-function getSuppressedInternalNotchEdges(
-  pitchedEvents: PitchedRenderEvent[],
-): SuppressedNotchEdges {
-  const suppressedEdges: SuppressedNotchEdges = {
-    bottom: new Set<number>(),
-    top: new Set<number>(),
-  };
-
-  pitchedEvents.forEach((event) => {
-    const sortedPitches = [...event.pitches].sort(
-      (left, right) => left - right,
-    );
-
-    sortedPitches.slice(0, -1).forEach((pitch, index) => {
-      const nextPitch = sortedPitches[index + 1]!;
-
-      if (nextPitch - pitch > 3) {
-        return;
-      }
-
-      suppressedEdges.top.add(pitch);
-      suppressedEdges.bottom.add(nextPitch);
-    });
-  });
-
-  return suppressedEdges;
 }
 
 function getCenterSpanNotchSets(spans: ProjectedSpan[]): CenterSpanNotchSets {
@@ -718,7 +626,7 @@ function getPitchedRenderEvents(
 }
 
 function getSliceGeometryContext(
-  projectedSegment: RenderSegmentLayout["segment"],
+  _projectedSegment: RenderSegmentLayout["segment"],
   renderSegmentLayout: RenderSegmentLayout,
   harmonicSlice: RenderSegmentLayout["segment"]["harmonicSlices"][number],
 ): SliceGeometryContext {
@@ -728,18 +636,9 @@ function getSliceGeometryContext(
   );
 
   return {
-    nextJoinGapPx:
-      harmonicSlice.touchesSegmentEnd ||
-      harmonicSlice.startOffset + harmonicSlice.duration <
-        projectedSegment.totalDuration
-        ? SEGMENT_GAP_PX
-        : 0,
+    nextJoinGapPx: SEGMENT_GAP_PX,
     notchSets: getCenterSpanNotchSets(harmonicSlice.center.spans),
     pitchedEvents: getPitchedRenderEvents(renderSegmentLayout, harmonicSlice),
-    prevJoinGapPx:
-      harmonicSlice.touchesSegmentStart || harmonicSlice.startOffset > 0
-        ? SEGMENT_GAP_PX
-        : 0,
     sliceBounds,
   };
 }
@@ -765,10 +664,14 @@ function getSpanNotchGeometry(
   const adjacentSpanApexOffset =
     PITCH_STEP_HEIGHT_PX -
     SPAN_EVENT_CLEARANCE_PX +
-    CENTER_SPAN_NOTCH_HEIGHT_EXTENSION_PX;
+    CENTER_SPAN_NOTCH_HEIGHT_EXTENSION_PX +
+    CENTER_SPAN_NOTCH_BASE_OUTSET_PX;
   const apexX =
     centerX - adjacentSpanDirection * CENTER_SPAN_NOTCH_APEX_X_OFFSET_PX;
-  const baseY = spanEdgeY + adjacentSpanDirection * adjacentSpanBaseOffset;
+  const baseY =
+    spanEdgeY +
+    adjacentSpanDirection *
+      (adjacentSpanBaseOffset - CENTER_SPAN_NOTCH_BASE_OUTSET_PX);
 
   return {
     apexX,
@@ -805,16 +708,13 @@ function buildRegionGraphics(
   const regionGraphics: RegionGraphic[] = [];
 
   projectedSegment.harmonicSlices.forEach((harmonicSlice) => {
-    const centerColor =
-      regionToColor(harmonicSlice.harmonic.center.pitchClasses) ?? "#111111";
-    const centerDarkColor = getCenterDarkColor(
-      harmonicSlice.harmonic.center.pitchClasses,
-    );
+    const centerPitchClasses = getRegionPitchClasses(harmonicSlice.harmonic.center);
+    const centerColor = regionToColor(centerPitchClasses);
+    const centerDarkColor = getCenterDarkColor(centerPitchClasses);
     const {
       nextJoinGapPx,
       notchSets,
       pitchedEvents,
-      prevJoinGapPx,
       sliceBounds,
     } = getSliceGeometryContext(
       projectedSegment,
@@ -822,49 +722,20 @@ function buildRegionGraphics(
       harmonicSlice,
     );
 
-    harmonicSlice.field.spans.forEach((projectedSpan) => {
-      regionGraphics.push({
-        bounds: sliceBounds,
+    regionGraphics.push(
+      ...buildFieldSpanRegionGraphics(sliceBounds, nextJoinGapPx, harmonicSlice.field.spans),
+      ...buildCenterSpanRegionGraphics(
+        layout.maxPitch,
+        sliceBounds,
+        renderSegmentLayout,
         nextJoinGapPx,
-        paint: getFieldPaint(),
-        prevJoinGapPx,
-        projectedSpan,
-        type: "span",
-      });
-    });
-    harmonicSlice.center.spans.forEach((projectedSpan) => {
-      const highlightStrength: HighlightStrength =
-        globalHighlightPitch === undefined
-          ? "base"
-          : spanContainsPitch(projectedSpan, globalHighlightPitch)
-            ? "strong"
-            : spanContainsPitchClass(
-                  projectedSpan,
-                  mod(globalHighlightPitch, 12),
-                )
-              ? "mid"
-              : "base";
-
-      regionGraphics.push({
-        bounds: sliceBounds,
-        nextJoinGapPx,
-        paint: getCenterPaint(centerColor, highlightStrength),
-        prevJoinGapPx,
-        projectedSpan,
-        type: "span",
-      });
-      const notchEdges = getCenterSpanNotchEdges(notchSets, projectedSpan);
-      regionGraphics.push(
-        ...appendCenterSpanNotches(
-          layout.maxPitch,
-          sliceBounds,
-          renderSegmentLayout,
-          projectedSpan,
-          notchEdges,
-          pitchedEvents,
-        ),
-      );
-    });
+        harmonicSlice.center.spans,
+        centerColor,
+        globalHighlightPitch,
+        notchSets,
+        pitchedEvents,
+      ),
+    );
     harmonicSlice.projectedGroundingMarks?.marks.forEach((mark) => {
       regionGraphics.push({
         fill: centerDarkColor,
@@ -879,6 +750,60 @@ function buildRegionGraphics(
   return regionGraphics;
 }
 
+function buildFieldSpanRegionGraphics(
+  sliceBounds: HorizontalBounds,
+  nextJoinGapPx: number,
+  projectedSpans: ProjectedSpan[],
+): RegionGraphic[] {
+  return projectedSpans.map((projectedSpan) => ({
+    bounds: sliceBounds,
+    nextJoinGapPx,
+    paint: getFieldPaint(),
+    projectedSpan,
+    type: "span" as const,
+  }));
+}
+
+function buildCenterSpanRegionGraphics(
+  maxPitch: number,
+  sliceBounds: HorizontalBounds,
+  renderSegmentLayout: RenderSegmentLayout,
+  nextJoinGapPx: number,
+  projectedSpans: ProjectedSpan[],
+  centerColor: string | undefined,
+  globalHighlightPitch: number | undefined,
+  notchSets: CenterSpanNotchSets,
+  pitchedEvents: PitchedRenderEvent[],
+): RegionGraphic[] {
+  const regionGraphics: RegionGraphic[] = [];
+
+  projectedSpans.forEach((projectedSpan) => {
+    regionGraphics.push({
+      bounds: sliceBounds,
+      nextJoinGapPx,
+      paint: getCenterPaint(
+        getResolvedCenterSpanColor(centerColor, projectedSpan),
+        getCenterSpanHighlightStrength(projectedSpan, globalHighlightPitch),
+      ),
+      projectedSpan,
+      type: "span",
+    });
+
+    regionGraphics.push(
+      ...appendCenterSpanNotches(
+        maxPitch,
+        sliceBounds,
+        renderSegmentLayout,
+        projectedSpan,
+        getCenterSpanNotchEdges(notchSets, projectedSpan),
+        pitchedEvents,
+      ),
+    );
+  });
+
+  return regionGraphics;
+}
+
 function positionRegionGraphic(
   layout: NotationLayout,
   regionGraphic: RegionGraphic,
@@ -888,7 +813,6 @@ function positionRegionGraphic(
       const pathData = getProjectedSpanPath(
         layout.maxPitch,
         regionGraphic.nextJoinGapPx,
-        regionGraphic.prevJoinGapPx,
         regionGraphic.bounds,
         regionGraphic.projectedSpan,
       );
@@ -946,7 +870,7 @@ function positionRegionGraphic(
         height: GROUNDING_MARK_HEIGHT_PX,
         type: "ground",
         width,
-        x: regionGraphic.sliceX - SEGMENT_GAP_PX / 2,
+        x: regionGraphic.sliceX,
         y: y - GROUNDING_MARK_HEIGHT_PX / 2,
       };
     }
@@ -986,8 +910,9 @@ function buildPositionedRegionGraphics(
   );
 
   return [
-    ...positionedGraphics.filter((graphic) => graphic.type !== "notch"),
+    ...positionedGraphics.filter((graphic) => graphic.type === "span"),
     ...positionedGraphics.filter((graphic) => graphic.type === "notch"),
+    ...positionedGraphics.filter((graphic) => graphic.type === "ground"),
   ];
 }
 

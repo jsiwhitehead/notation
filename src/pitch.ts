@@ -42,7 +42,7 @@ export function getOrderedFifthsPositions(
   );
 }
 
-export function getLargestFifthsGap(
+function getLargestFifthsGap(
   positions: number[],
 ): { end: number; size: number; start: number } | undefined {
   if (positions.length === 0) {
@@ -71,7 +71,7 @@ export function getLargestFifthsGap(
   };
 }
 
-export type ToneSpacedPitchClassSpan = {
+type ToneSpacedPitchClassSpan = {
   end: number;
   start: number;
 };
@@ -126,6 +126,22 @@ export function getRegionMidpointInHalfFifths(
   }
 
   const largestGap = getLargestFifthsGap(positions)!;
+  const largestGapCount = positions.reduce((count, position, index) => {
+    const nextPosition = positions[(index + 1) % positions.length]!;
+
+    return (
+      count +
+      Number(
+        getCircularInterval(position, nextPosition, FIFTHS_CYCLE_SIZE) ===
+          largestGap.size,
+      )
+    );
+  }, 0);
+
+  if (largestGapCount !== 1) {
+    return undefined;
+  }
+
   const regionStart = largestGap.end;
   const regionSpan = getCircularInterval(
     regionStart,

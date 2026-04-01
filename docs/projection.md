@@ -18,7 +18,7 @@ The following aspects of projection appear stable in this repository:
 - projection remains distinct from both the harmony stage and rendering
 - harmonic structure and events stay together through projection
 - projection produces one projected result
-- durations, simultaneity, and rests survive through projection
+- durations, simultaneous events, and rests survive through projection
 - projection owns the musical pitch-space placement needed for rendering
 - carried harmonic structure remains analysis-native while projected placement becomes pitch-space-native
 
@@ -62,7 +62,7 @@ For pitched events, projection also carries explicit field-span ownership for ea
 Each projected harmonic region currently contains:
 
 - ordered projected spans in visible pitch-space
-- optional `prev` and `next` neighboring span geometry on each projected span when projection determines an adjacent join
+- optional rightward `join` metadata on each projected span when projection determines an adjacent continuation
 
 Projected spans are render-facing geometry objects. In the current implementation they may extend beyond the nominal visible window because projection repeats whole spans rather than clipping spans partway through.
 
@@ -91,7 +91,7 @@ In the current implementation, projection:
 
 1. derives a visible pitch range from events
 2. computes event offsets layer by layer when offsets are not explicitly authored
-3. preserves durations, layer identity, and simultaneities in the resulting events
+3. preserves durations, layer identity, and simultaneous events in the resulting events
 4. derives ordered shared time positions from event offsets inside each segment
 5. computes simple segment-local x-positions for projected events from those shared time positions
 6. derives a simple segment width from time-position spacing demand
@@ -99,12 +99,12 @@ In the current implementation, projection:
 8. consumes harmony-stage segment-local harmonic slice analysis, including canonical harmonic lane spans
 9. repeats those harmonic spans as whole spans across the visible window rather than clipping spans partway through
 10. preserves projected harmonic spans as render-facing span objects, including degenerate zero-height spans
-11. resolves adjacent-span joins inside projection and attaches neighboring span geometry directly to projected spans
-12. allows those neighboring span geometries to extend beyond the nominal visible window when a full-span continuation falls just above or below it
+11. resolves adjacent-span joins inside projection and attaches rightward join metadata directly to projected spans
+12. allows those joins to extend beyond the nominal visible window when a full-span continuation falls just above or below it
 13. derives projected `root` and `ground` marks from `grounding` within the segment's projected harmonic span extent when grounding is present
 14. emits one or more variable-length `harmonicSlices` per segment from harmony-stage `HarmonicSlice` analysis, with one full-segment slice when no stronger local split is warranted
 15. carries forward slice-local harmonic field, slice-local harmonic center, and optional grounding
 16. assigns explicit owning field spans to pitched event notes from those projected harmonic slices, only when the projected pitch lies on the owning span's tone-step lattice
 17. emits projection as the unified structure consumed by the renderer
 
-In the current implementation, projection does not decide harmonic slice boundaries or baseline harmonic region shape itself. It consumes harmony-stage `HarmonicSlice` analysis, converts slice timing into segment-local x extents, repeats harmony-stage harmonic span classes into visible pitch-space, resolves visible join geometry between adjacent projected regions, and assigns projected event ownership against those already-projected harmonic spans.
+In the current implementation, projection does not decide harmonic slice boundaries or baseline harmonic region shape itself. It consumes harmony-stage `HarmonicSlice` analysis, converts slice timing into segment-local x extents, repeats harmony-stage harmonic span classes into visible pitch-space, attaches rightward join metadata to projected spans, and assigns projected event ownership against those already-projected harmonic spans.

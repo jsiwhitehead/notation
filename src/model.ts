@@ -1,7 +1,7 @@
 export type PitchClass = number;
 export type EventLayer = number;
 export type EventOffset = number;
-export type ChordSymbol = string;
+type ChordSymbol = string;
 export type TimedChordSymbol = {
   offset: EventOffset;
   symbol: ChordSymbol;
@@ -55,8 +55,7 @@ export type HarmonicRegionSpan = {
 };
 
 export type HarmonicRegion = {
-  lanes: HarmonicRegionSpan[];
-  pitchClasses: PitchClass[];
+  spans: HarmonicRegionSpan[];
 };
 
 export type HarmonicSegment = {

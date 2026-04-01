@@ -90,7 +90,7 @@ Canonical domain terms SHOULD be used consistently across code and documentation
 - duration, layer, offset
 - pitch, pitch class, pitch range
 - fifths-space, pitch-space
-- harmony stage, harmonic evidence, harmonic structure
+- harmony, evidence, region, slice
 - field, center, grounding, root, ground
 - projection, span
 - rendering

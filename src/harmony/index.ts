@@ -1,15 +1,15 @@
-import { normalizeChordSymbol } from "./chord";
+import { buildCenter, scoreCenterWithWeightMap } from "./selector";
 import {
-  buildCenterFromPitchClasses,
-  buildRegion,
-  getFilledFifthsRegion,
-  isBaselineValidRegion,
-} from "./region";
-import {
-  getEventPitches,
-  getEventPitchClasses,
-  uniqueSortedPitchClasses,
-} from "../pitch";
+  collectSegmentEvidence,
+  getActiveOrderedChordSymbol,
+  getOrderedTimedChordSymbols,
+  getPitchClassWeights,
+  getTimedChordSymbolWindows,
+  getTimedChordSymbols,
+  type SegmentEvidence,
+} from "./evidence";
+import { getRegionPitchClasses } from "./region";
+import { getEventPitches } from "../pitch";
 import { getSegmentTotalDuration } from "../segment";
 
 import type {
@@ -21,30 +21,12 @@ import type {
   HarmonicSlice,
   HarmonicStructure,
   HarmonicRegion,
-  PitchClass,
   PieceInput,
   SegmentInput,
-  TimedChordSymbol,
 } from "../model";
 
-const MIN_SETTLED_REGION_EVIDENCE = 3;
-const FIELD_CONTINUITY_OVERLAP = 3;
 const MIN_SPLIT_SCORE_IMPROVEMENT = 1;
 const SPLIT_DIVERGENCE_WEIGHT = 0.2;
-const SPLIT_CENTER_COMPACTNESS_WEIGHT = 0.1;
-
-type SegmentEvidence = {
-  pitchClassWeightByPitchClass: Map<PitchClass, number>;
-  chordGroundPitchClass?: PitchClass;
-  chordRootPitchClass?: PitchClass;
-  localPitchClasses: PitchClass[];
-};
-
-type TimedChordSymbolWindow = {
-  duration: number;
-  offset: EventOffset;
-  symbol: string;
-};
 
 type SegmentationCandidate = {
   score: number;
@@ -58,288 +40,9 @@ type SplitCandidateEvaluation = {
   rightSegment: SegmentInput;
 };
 
-function countOverlap(left: PitchClass[], right: PitchClass[]): number {
-  return left.filter((pitch) => right.includes(pitch)).length;
-}
-
-function addPitchClassWeight(
-  weightByPitchClass: Map<PitchClass, number>,
-  pitchClass: PitchClass,
-  weight: number,
-): void {
-  weightByPitchClass.set(
-    pitchClass,
-    (weightByPitchClass.get(pitchClass) ?? 0) + weight,
-  );
-}
-
-function getCapturedWeight(
-  center: HarmonicRegion,
-  weightByPitchClass: Map<PitchClass, number>,
-): number {
-  return center.pitchClasses.reduce(
-    (totalWeight, pitchClass) =>
-      totalWeight + (weightByPitchClass.get(pitchClass) ?? 0),
-    0,
-  );
-}
-
-function getOmittedWeight(
-  center: HarmonicRegion,
-  weightByPitchClass: Map<PitchClass, number>,
-): number {
-  return [...weightByPitchClass.entries()].reduce(
-    (totalWeight, [pitchClass, weight]) =>
-      center.pitchClasses.includes(pitchClass)
-        ? totalWeight
-        : totalWeight + weight,
-    0,
-  );
-}
-
-function collectSegmentEvidence(segment: SegmentInput): SegmentEvidence {
-  const activeChordSymbol = getUnambiguousSegmentGroundingSymbol(segment);
-  const normalizedChordSymbol =
-    activeChordSymbol === undefined
-      ? undefined
-      : normalizeChordSymbol(activeChordSymbol);
-  const pitchClassWeightByPitchClass = getPitchClassWeightByPitchClass(segment);
-
-  const localPitchClasses = [...pitchClassWeightByPitchClass.keys()].sort(
-    (left, right) => left - right,
-  );
-
-  return {
-    pitchClassWeightByPitchClass,
-    localPitchClasses,
-    ...(normalizedChordSymbol === undefined
-      ? {}
-      : {
-          chordGroundPitchClass: normalizedChordSymbol.groundPitchClass,
-          chordRootPitchClass: normalizedChordSymbol.rootPitchClass,
-        }),
-  };
-}
-
-function getTimedChordSymbols(segment: SegmentInput): TimedChordSymbol[] {
-  return segment.chordSymbols ?? [];
-}
-
-function getOrderedTimedChordSymbols(segment: SegmentInput): TimedChordSymbol[] {
-  return [...getTimedChordSymbols(segment)].sort(
-    (left, right) => left.offset - right.offset,
-  );
-}
-
-function getUnambiguousSegmentGroundingSymbol(
-  segment: SegmentInput,
-): string | undefined {
-  const timedChordSymbols = getOrderedTimedChordSymbols(segment);
-
-  return timedChordSymbols.length === 1 ? timedChordSymbols[0]!.symbol : undefined;
-}
-
-function getActiveChordSymbol(
-  segment: SegmentInput,
-  offset: EventOffset = 0,
-): string | undefined {
-  return getOrderedTimedChordSymbols(segment)
-    .filter((timedChordSymbol) => timedChordSymbol.offset <= offset)
-    .at(-1)?.symbol;
-}
-
-function getTimedChordSymbolWindows(
-  segment: SegmentInput,
-  totalDuration: number,
-): TimedChordSymbolWindow[] {
-  const timedChordSymbols = getOrderedTimedChordSymbols(segment).filter(
-    (timedChordSymbol) => timedChordSymbol.offset < totalDuration,
-  );
-
-  return timedChordSymbols.flatMap((timedChordSymbol, index) => {
-    const nextOffset = timedChordSymbols[index + 1]?.offset ?? totalDuration;
-    const duration = nextOffset - timedChordSymbol.offset;
-
-    if (duration <= 0) {
-      return [];
-    }
-
-    return [
-      {
-        duration,
-        offset: timedChordSymbol.offset,
-        symbol: timedChordSymbol.symbol,
-      },
-    ];
-  });
-}
-
-function getPitchClassWeightByPitchClass(
-  segment: SegmentInput,
-): Map<PitchClass, number> {
-  const pitchClassWeightByPitchClass = new Map<PitchClass, number>();
-  const totalDuration = getSegmentTotalDuration(segment);
-
-  segment.events.forEach((event) => {
-    getEventPitchClasses(event).forEach((pitchClass) => {
-      addPitchClassWeight(
-        pitchClassWeightByPitchClass,
-        pitchClass,
-        event.duration,
-      );
-    });
-  });
-
-  getTimedChordSymbolWindows(segment, totalDuration).forEach(
-    ({ duration, symbol }) => {
-      const normalizedTimedChordSymbol = normalizeChordSymbol(symbol);
-
-      if (normalizedTimedChordSymbol === undefined) {
-        return;
-      }
-
-      normalizedTimedChordSymbol.pitchClasses.forEach((pitchClass) => {
-        addPitchClassWeight(
-          pitchClassWeightByPitchClass,
-          pitchClass,
-          duration,
-        );
-      });
-    },
-  );
-
-  return pitchClassWeightByPitchClass;
-}
-
-function getPowerSet(values: PitchClass[]): PitchClass[][] {
-  return Array.from({ length: 1 << values.length }, (_, mask) =>
-    values.filter((_, index) => (mask & (1 << index)) !== 0),
-  );
-}
-
-function isStrongRescuedCenter(
-  center: HarmonicRegion,
-  weightByPitchClass: Map<PitchClass, number>,
-): boolean {
-  const includedWeights = center.pitchClasses
-    .map((pitchClass) => weightByPitchClass.get(pitchClass) ?? 0)
-    .filter((weight) => weight > 0);
-  const omittedWeight = getOmittedWeight(center, weightByPitchClass);
-
-  return (
-    includedWeights.length > 0 &&
-    center.pitchClasses.length >= MIN_SETTLED_REGION_EVIDENCE &&
-    getCapturedWeight(center, weightByPitchClass) > omittedWeight &&
-    omittedWeight < Math.min(...includedWeights)
-  );
-}
-
-function getDirectCenter(segmentEvidence: SegmentEvidence): HarmonicRegion {
-  return buildCenterFromPitchClasses(
-    segmentEvidence.localPitchClasses,
-    segmentEvidence.localPitchClasses,
-  );
-}
-
-function getRescueCandidateCenters(
-  segmentEvidence: SegmentEvidence,
-): HarmonicRegion[] {
-  const candidateCenterByKey = new Map<string, HarmonicRegion>();
-
-  getPowerSet(segmentEvidence.localPitchClasses).forEach((pitchClassSubset) => {
-    const candidateLocalPitchClasses = uniqueSortedPitchClasses(
-      pitchClassSubset,
-    );
-    const candidateCenter = buildCenterFromPitchClasses(
-      candidateLocalPitchClasses,
-      candidateLocalPitchClasses,
-    );
-
-    if (candidateCenter.pitchClasses.length === 0) {
-      return;
-    }
-
-    candidateCenterByKey.set(
-      candidateCenter.pitchClasses.join(","),
-      candidateCenter,
-    );
-  });
-
-  return [...candidateCenterByKey.values()];
-}
-
-function rankRescueCandidateCenters(
-  segmentEvidence: SegmentEvidence,
-  candidateCenters: HarmonicRegion[],
-): HarmonicRegion | undefined {
-  const strongCandidateCenters = candidateCenters.filter((candidateCenter) =>
-    isStrongRescuedCenter(
-      candidateCenter,
-      segmentEvidence.pitchClassWeightByPitchClass,
-    ),
-  );
-
-  if (strongCandidateCenters.length === 0) {
-    return undefined;
-  }
-
-  return strongCandidateCenters.sort((left, right) => {
-    const capturedWeightDifference =
-      getCapturedWeight(
-        right,
-        segmentEvidence.pitchClassWeightByPitchClass,
-      ) -
-      getCapturedWeight(
-        left,
-        segmentEvidence.pitchClassWeightByPitchClass,
-      );
-
-    if (capturedWeightDifference !== 0) {
-      return capturedWeightDifference;
-    }
-
-    const pitchClassCountDifference =
-      right.pitchClasses.length - left.pitchClasses.length;
-
-    if (pitchClassCountDifference !== 0) {
-      return pitchClassCountDifference;
-    }
-
-    return (
-      getOmittedWeight(
-        left,
-        segmentEvidence.pitchClassWeightByPitchClass,
-      ) -
-      getOmittedWeight(right, segmentEvidence.pitchClassWeightByPitchClass)
-    );
-  })[0]!;
-}
-
-function buildWeightedCenter(segmentEvidence: SegmentEvidence): HarmonicRegion {
-  const directCenter = getDirectCenter(segmentEvidence);
-
-  if (directCenter.pitchClasses.length > 0) {
-    return directCenter;
-  }
-
-  return (
-    rankRescueCandidateCenters(
-      segmentEvidence,
-      getRescueCandidateCenters(segmentEvidence),
-    ) ?? directCenter
-  );
-}
-
-function buildCenter(segmentEvidence: SegmentEvidence): HarmonicRegion {
-  return buildWeightedCenter(segmentEvidence);
-}
-
 function getGrounding(
-  center: HarmonicRegion,
   segmentEvidence: SegmentEvidence,
 ): Grounding | undefined {
-  void center;
-
   const { chordGroundPitchClass, chordRootPitchClass } = segmentEvidence;
 
   if (
@@ -355,58 +58,19 @@ function getGrounding(
   return undefined;
 }
 
-function getNeighborCenters(
-  centers: HarmonicRegion[],
-  index: number,
-): HarmonicRegion[] {
-  return [centers[index - 1], centers[index + 1]].filter(
-    (center): center is HarmonicRegion =>
-      center !== undefined && center.pitchClasses.length > 0,
-  );
+function buildField(center: HarmonicRegion): HarmonicRegion {
+  return {
+    spans: [...center.spans],
+  };
 }
 
-function buildField(
-  center: HarmonicRegion,
-  neighborCenters: HarmonicRegion[],
-): HarmonicRegion {
-  if (neighborCenters.length === 0) {
-    return buildRegion(center.pitchClasses);
-  }
-
-  const continuityPitchClasses = neighborCenters.flatMap((neighborCenter) => {
-    if (
-      countOverlap(center.pitchClasses, neighborCenter.pitchClasses) >=
-      FIELD_CONTINUITY_OVERLAP
-    ) {
-      return neighborCenter.pitchClasses;
-    }
-
-    return [];
-  });
-
-  if (continuityPitchClasses.length === 0) {
-    return buildRegion(center.pitchClasses);
-  }
-
-  const pitchClasses = getFilledFifthsRegion([
-    ...center.pitchClasses,
-    ...continuityPitchClasses,
-  ]);
-
-  if (!isBaselineValidRegion(pitchClasses)) {
-    return buildRegion(center.pitchClasses);
-  }
-
-  return buildRegion(pitchClasses);
-}
-
-function analyzeSegmentCenter(segment: SegmentInput): {
+function analyzeSegmentHarmony(segment: SegmentInput): {
   center: HarmonicRegion;
   grounding: Grounding | undefined;
 } {
   const segmentEvidence = collectSegmentEvidence(segment);
   const center = buildCenter(segmentEvidence);
-  const grounding = getGrounding(center, segmentEvidence);
+  const grounding = getGrounding(segmentEvidence);
 
   return {
     center,
@@ -415,11 +79,11 @@ function analyzeSegmentCenter(segment: SegmentInput): {
 }
 
 function analyzeIsolatedSegment(segment: SegmentInput): HarmonicSegment {
-  const { center, grounding } = analyzeSegmentCenter(segment);
+  const { center, grounding } = analyzeSegmentHarmony(segment);
 
   return {
     center,
-    field: buildField(center, []),
+    field: buildField(center),
     ...(grounding === undefined ? {} : { grounding }),
   };
 }
@@ -466,8 +130,8 @@ function analyzeSegmentSlices(
         splitCandidate.rightHarmonic.center,
       ) +
       getBoundaryContrastScore(
-        splitCandidate.leftHarmonic.center.pitchClasses,
-        splitCandidate.rightHarmonic.center.pitchClasses,
+        getRegionPitchClasses(splitCandidate.leftHarmonic.center),
+        getRegionPitchClasses(splitCandidate.rightHarmonic.center),
       );
 
     if (bestSplitCandidate === undefined || score >= bestSplitCandidate.score) {
@@ -548,18 +212,18 @@ function evaluateSplitCandidate(
 
   const leftHarmonic = analyzeIsolatedSegment(leftSegment);
   const rightHarmonic = analyzeIsolatedSegment(rightSegment);
+  const segmentPitchClasses = getRegionPitchClasses(harmonic.center);
+  const leftPitchClasses = getRegionPitchClasses(leftHarmonic.center);
+  const rightPitchClasses = getRegionPitchClasses(rightHarmonic.center);
 
   if (
-    leftHarmonic.center.pitchClasses.length === 0 ||
-    rightHarmonic.center.pitchClasses.length === 0 ||
-    pitchClassesEqual(
-      leftHarmonic.center.pitchClasses,
-      rightHarmonic.center.pitchClasses,
-    ) ||
+    leftPitchClasses.length === 0 ||
+    rightPitchClasses.length === 0 ||
+    pitchClassesEqual(leftPitchClasses, rightPitchClasses) ||
     isWeakPreviewBoundary(
-      harmonic.center.pitchClasses,
-      leftHarmonic.center.pitchClasses,
-      rightHarmonic.center.pitchClasses,
+      segmentPitchClasses,
+      leftPitchClasses,
+      rightPitchClasses,
     )
   ) {
     return undefined;
@@ -672,18 +336,9 @@ function scoreAnalyzedWindow(
   segment: SegmentInput,
   center: HarmonicRegion,
 ): number {
-  const weightByPitchClass = getPitchClassWeightByPitchClass(segment);
-  const capturedWeight = getCapturedWeight(center, weightByPitchClass);
-  const omittedWeight = getOmittedWeight(center, weightByPitchClass);
-
-  if (center.pitchClasses.length === 0) {
-    return -omittedWeight;
-  }
-
-  return (
-    capturedWeight -
-    omittedWeight -
-    center.pitchClasses.length * SPLIT_CENTER_COMPACTNESS_WEIGHT
+  return scoreCenterWithWeightMap(
+    center,
+    getPitchClassWeights(segment),
   );
 }
 
@@ -702,7 +357,10 @@ function buildWindowedSegment(
   endOffset: EventOffset,
 ): SegmentInput {
   const timedChordSymbols = getOrderedTimedChordSymbols(segment);
-  const inheritedChordSymbol = getActiveChordSymbol(segment, startOffset);
+  const inheritedChordSymbol = getActiveOrderedChordSymbol(
+    timedChordSymbols,
+    startOffset,
+  );
   const windowChordSymbols = timedChordSymbols
     .filter(
       (timedChordSymbol) =>
@@ -755,12 +413,11 @@ function hasPitchedEvents(events: EventInput[]): boolean {
 }
 
 export function runEngine(input: PieceInput): HarmonicStructure {
-  const analyzedCenters = input.segments.map(analyzeSegmentCenter);
-  const centers = analyzedCenters.map((segment) => segment.center);
+  const analyzedCenters = input.segments.map(analyzeSegmentHarmony);
   const segments = analyzedCenters.map(
-    ({ center, grounding }, index): HarmonicSegment => ({
+    ({ center, grounding }): HarmonicSegment => ({
       center,
-      field: buildField(center, getNeighborCenters(centers, index)),
+      field: buildField(center),
       ...(grounding === undefined ? {} : { grounding }),
     }),
   );

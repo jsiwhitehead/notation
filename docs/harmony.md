@@ -21,7 +21,7 @@ In the current code, the harmony stage consumes a simple canonical input:
 The canonical input contains authored input only:
 
 - notes
-- simultaneities
+- chord events
 - rests
 - durations
 - optional local timing and layer organization
@@ -42,7 +42,7 @@ Each harmonic segment contains:
 - `grounding`: optional grounding pair with `root` and `ground` that primarily orients the `center`
 - `harmonicSlices`: one or more segment-local slice analyses, each carrying `startOffset`, `duration`, and a slice-local harmonic segment
 
-`field` and `center` are represented as ordered pitch-class collections in fifths-space together with canonical tone-spaced lane spans. These remain analysis-native harmonic objects rather than final renderer-facing pitch-space spans.
+`field` and `center` are represented as harmonic spans. These remain analysis-native harmonic objects rather than final renderer-facing pitch-space spans. Pitch-class collections are derived from those spans when needed for scoring, comparison, and coloring.
 
 `center` and `field` are the same kind of object inferred at different scopes. In the simplest cases they may be identical.
 
@@ -72,19 +72,19 @@ Projection is the next stage after the harmony stage. It takes the analysis-nati
 
 ## Current implementation
 
-The current harmony stage is local and deterministic. It derives each segment’s `center` from current-segment evidence, then uses adjacent locally settled centers when broadening `field`. This section describes the current implementation, not a permanent architectural guarantee.
+The current harmony stage is local and deterministic. It derives each segment’s `center` from current-segment evidence and currently sets `field = center`. This section describes the current implementation, not a permanent architectural guarantee.
 
-The current implementation runs in two passes:
+The current implementation proceeds as follows:
 
-1. Collect event pitch-class evidence from notes and simultaneities.
+1. Collect event pitch-class evidence from notes and chord events.
 2. Normalize optional timed chord symbols into committed chord-derived pitch-class sets plus optional root and ground grounding.
 3. Combine event evidence and chord-derived evidence into one local duration-weighted harmonic evidence model for the segment or slice. Event pitch classes contribute their authored durations. Chord-symbol pitch classes contribute the duration that each active chord symbol covers.
-4. Derive a local `center` from that local evidence and apply conservative fifths-space filling when the local evidence is strong enough to justify filling short internal fifth-gaps, with a current dyad exception that fills the uniquely shorter fifths path for two-note evidence and leaves tritone dyads unfilled.
+4. Derive a local `center` from that local evidence as a span-based harmonic region.
 5. Derive `grounding` for that `center` only from trusted chord-symbol grounding when available.
-6. Derive a broader `field` from continuity across adjacent locally settled centers.
+6. Set `field = center` for the current implementation.
 7. If timed chord-symbol changes are present, use those authored change offsets as the segment-local harmonic slice boundaries. Otherwise, evaluate candidate intra-segment harmonic slice boundaries from authored onsets, preferring one unsplit segment unless a stronger single split clearly improves harmonic fit.
 8. Emit the segment’s canonical harmonic structure in fifths-space.
 
-`center` is therefore the immediate local settlement for a segment: a fifths-space region derived from the local notes available at that moment, including notes provided by the chord symbol. In the current baseline, short internal fifth-gaps may be filled, and two-note evidence currently fills the uniquely shorter fifths path while leaving the ambiguous tritone case unfilled, but a region is only kept when its pitch classes admit one canonical paired two-lane reading in tone-spaced pitch-class space and those two lane spans are non-overlapping. Single-lane span readings are not treated as baseline-valid regions for now. The harmony stage also derives canonical lane span classes for that valid region. When fifth-filling breaks that baseline shape for event-derived evidence, the harmony stage may fall back to the direct unfixed set; otherwise it emits an empty region. `field` is broader local context: it is widened mainly by continuity across neighboring centers rather than by direct pitch-space expansion. Projection still repeats these span classes across the visible range and resolves join geometry between adjacent regions, but the harmony stage now owns the baseline region-shape and pair-lane decisions.
+`center` is therefore the immediate local settlement for a segment: a fifths-space region derived from the local notes available at that moment, including pitch classes contributed by the active chord symbol. In the current baseline, the harmony stage emits span-based regions directly and falls back through three levels when evidence is weak: full local evidence, subset-backed candidate selection, then singleton spans for the local evidence pitch classes. `field` currently mirrors `center`. Projection still repeats these span classes across the visible range and resolves join geometry between adjacent regions, but the harmony stage now owns the baseline region-shape decisions.
 
-For the current baseline, each active chord symbol contributes one committed set of local pitch classes for the duration that it covers. Timed chord-symbol changes may therefore change the active local grounding and weighted evidence inside one segment when slice analysis splits that segment. When direct local evidence does not admit a valid center, any rescue search is performed over the full local evidence set rather than event-only subsets. Segment-level grounding is only emitted when one unambiguous timed chord symbol governs the segment-level evidence; otherwise slice-level grounding may still be present while segment-level grounding remains undefined. The harmony stage does not yet model a second level of chord-implied support such as a probable but defeasible fifth separate from committed chord-symbol content. Likewise, non-baseline shapes such as augmented and diminished collections are not yet preserved through dedicated exception rules; they fall outside the current two-span validity policy unless later logic admits them explicitly.
+For the current baseline, each active chord symbol contributes one committed set of local pitch classes for the duration that it covers. Timed chord-symbol changes may therefore change the active local grounding and weighted evidence inside one segment when slice analysis splits that segment. When direct local evidence does not admit a valid center, any rescue search is performed over the full local evidence set rather than event-only subsets. Segment-level grounding is only emitted when one unambiguous timed chord symbol governs the segment-level evidence; otherwise slice-level grounding may still be present while segment-level grounding remains undefined. The harmony stage does not yet model a second level of chord-implied support such as a probable but defeasible fifth separate from committed chord-symbol content. Non-baseline shapes such as augmented and diminished collections are therefore handled by the current span-cover fallback and weighted candidate selection rather than by dedicated exception rules.
