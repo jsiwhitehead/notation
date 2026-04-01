@@ -1,14 +1,43 @@
 # Music Notation Rendering Research
 
-This document distills research from mature notation systems into an implementation guide for this system. It focuses on the architecture and layout decisions that are worth carrying into implementation, plus the small set of areas where multiple best-practice options still exist.
+This document collects research from mature notation systems and related standards that inform this repository. It is a supporting companion to the core spec docs, not an authoritative spec for the codebase. The authoritative architectural contracts live in `docs/architecture.md`, `docs/authoring.md`, `docs/harmony.md`, `docs/projection.md`, and `docs/render.md`.
 
-## Approach
+## Role in this repo
 
-The simplest robust architecture is:
+This document is most useful as:
+
+- a record of lessons adopted from mature systems
+- a reference for future renderer and layout work
+- a place to capture useful downstream design guidance before it becomes part of the core spec
+- a map of source systems and references worth consulting when the codebase grows
+
+It should not act as a second architecture spec or a parallel roadmap.
+
+## Adopted lessons already visible in the codebase
+
+The following ideas are already meaningfully embodied, either fully or in clear direction, in the repository:
+
+- musical meaning stays separate from visual realization
+- shared temporal structure is part of the architectural backbone
+- projection acts as an intermediate representation between analysis and rendering
+- layout works on intermediate structures rather than drawing directly from raw musical input
+- drawing happens after layout decisions are established
+- paint order is explicit
+- SMuFL metadata is used as a source of glyph vocabulary, metrics, and anchors
+- attachment and ownership are made explicit where rendering should not rediscover them
+- focused layout and rendering modules are preferred over one monolithic routine
+
+These ideas belong in the core architecture docs once they become stable project commitments. This document exists to support and extend that architectural direction, especially for downstream visual work.
+
+The current codebase centers that downstream architectural balance on `Projection` as the strongest intermediate musical representation between analysis and rendering. Future work may introduce richer graphic or layout-side structures, but the value of the mature-system lessons collected here is in helping that evolution clarify stage boundaries rather than blur them.
+
+## Reference architectural pattern
+
+One robust reference pattern for notation systems is:
 
 `music -> graphic objects -> positioned graphic objects -> rendered output`
 
-Or, in architectural terms:
+In architectural terms:
 
 1. **Semantic model**
    What the music is: notes, rests, durations, voices, tuplets, attachments, grouping, ownership.
@@ -19,14 +48,18 @@ Or, in architectural terms:
 4. **Output layer**
    How positioned graphic objects are rendered or exported.
 
+This pattern is a useful reference model for downstream design. It is not, by itself, the spec of this repository.
+
+## Future downstream guidance
+
+The following sections are primarily guidance for rendering and layout work that is not yet fully embodied in the codebase.
+
 ### Architecture
 
-- musical meaning stays separate from graphic realization.
 - layout works on a dedicated graphic representation, not directly on the semantic model.
 - horizontal layout is organized around shared temporal structure.
 - layout decisions are dependency-ordered.
 - spacing, collision, alignment, and attachment are shared infrastructure, not per-symbol hacks.
-- drawing happens after layout, not during it.
 
 ### Design direction
 
@@ -47,7 +80,9 @@ Or, in architectural terms:
 - keep paint order explicit.
 - test visual behavior, not just data flow.
 
-### Open options
+## Open design choices
+
+The following questions remain open design choices rather than fixed architectural commitments:
 
 - exact spacing formula
 - lazy versus eager evaluation
@@ -57,13 +92,25 @@ Or, in architectural terms:
 
 Those choices should sit behind stable interfaces.
 
-### Critical contract
+## Critical contract
 
 The main architectural risk is failing to establish a clean contract between semantic ownership, shared time structure, vertical reference, attachment behavior, and late collision-aware shaping.
 
-## Graphic model
+## Reference model for downstream visual stages
 
-The graphic model is the intermediate engraved representation. It should be explicit enough that layout modules work on shared objects rather than on renderer-side assumptions.
+The following sections describe a reference model for graphic representation and layout drawn from mature systems.
+
+Use them as:
+
+- design guidance for future work
+- evaluation criteria for downstream visual architecture
+- reference material to compare against the core spec docs
+
+They are not, by themselves, normative contracts for this repository unless the core architecture docs adopt them explicitly.
+
+### Graphic model
+
+The graphic model is the intermediate engraved representation. It should be explicit enough that layout modules work on shared objects rather than on assumptions in rendering.
 
 ### Object families
 
@@ -97,7 +144,7 @@ Measurement SHOULD be metadata-based:
 
 Reuse SMuFL wherever it already solves the problem, and add only the extra project-specific metrics or anchors it does not provide. Internally, layout SHOULD depend on authoritative measurement data rather than runtime guesswork.
 
-## Layout system
+## Reference layout system
 
 This is where most complexity lives.
 
@@ -229,7 +276,7 @@ Breaks and justification:
 - vertical spacing and justification SHOULD be solved after local engraving geometry is stable.
 - manual or encoded breaks SHOULD enter as constraints on the breaking stage, not as renderer exceptions.
 
-## System-specific adaptations
+## System-specific downstream adaptations
 
 This system is not using a conventional staff as its primary vertical frame. SMuFL SHOULD still provide the default glyph vocabulary, metrics, and anchors wherever those map cleanly onto this system. Vertical reference, rest placement, and attachment behavior SHOULD be defined against the local pitch-space model rather than inherited from staff-middle assumptions.
 
@@ -247,7 +294,7 @@ This system is not using a conventional staff as its primary vertical frame. SMu
 - **Import/export boundary**
   Keep a clean distinction between notation-as-semantics and notation-as-appearance so future interchange does not require architectural surgery.
 
-## Sources
+## Reference systems and sources
 
 ### Core mature systems
 
@@ -297,7 +344,7 @@ This system is not using a conventional staff as its primary vertical frame. SMu
   Repo: [github.com/lenmus/lomse](https://github.com/lenmus/lomse)
   Site: [lomse.org](https://www.lomse.org/)
 
-### License note
+## License note
 
 Safe pattern:
 

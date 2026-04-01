@@ -84,7 +84,7 @@ PR checklist:
 
 Canonical domain terms SHOULD be used consistently across code and documentation. Avoid inventing synonyms for the following concepts:
 
-- authored input, chord symbol, canonical input
+- authored input, chord symbol, canonical authored input
 - piece, segment, event
 - note, chord, rest
 - duration, layer, offset
@@ -93,6 +93,7 @@ Canonical domain terms SHOULD be used consistently across code and documentation
 - harmony, evidence, region, slice
 - field, center, grounding, root, ground
 - projection, span
+- graphic object, positioned graphic object
 - rendering
 
 ## Change hygiene

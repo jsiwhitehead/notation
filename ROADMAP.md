@@ -1,13 +1,13 @@
 # Roadmap
 
-This document lists the main open problems that still matter for the repository. It intentionally omits work that is already present in the current codebase and avoids vague items that do not identify a concrete next step.
+This document lists the main open problems and development directions that still matter for the repository beyond the current spec docs. It intentionally omits work that is already present in the codebase and avoids vague items that do not identify a concrete next step.
 
 ## Canonical model and contracts
 
-- define the first stable canonical-input contract for segments, events, layers, offsets, and durations
+- harden and version the canonical authored input contract for segments, events, layers, offsets, and durations
 - define where piece-level metadata such as time-grid declarations, height hints, and global flags belongs
 - define where authored structural guidance such as guides and blocks belongs without collapsing it into derived harmonic structure
-- define stable serialization formats for canonical input, harmonic structure, and projection
+- define stable serialization formats for canonical authored input, harmonic structure, and projection
 - define how contract changes should be versioned and documented as the system grows
 - validate that architectural boundaries remain intact as the system grows
 
@@ -35,6 +35,7 @@ This document lists the main open problems that still matter for the repository.
 
 ## Rendering
 
+- decide how far future downstream architecture should continue to center on `Projection` versus introducing richer graphic or layout-side representations without blurring stage boundaries
 - introduce one richer renderer while preserving the current renderer as a simple baseline
 - add remaining rhythmic-detail rendering such as ties and grouped rests
 - define a stronger harmonic color policy for role clarity and perceptual tuning
@@ -44,7 +45,7 @@ This document lists the main open problems that still matter for the repository.
 
 ## Authored input and normalization
 
-- choose the first first-class authored-input path beyond direct seed data
+- add additional first-class authored-input paths beyond MusicXML import
 - define which authored guidance belongs above normalization and which belongs in canonical input
 - support richer segment structure, multi-line or multi-layer input, and compact text authoring without pre-encoding harmonic structure
 - add import and export adapters where they strengthen the canonical-model workflow

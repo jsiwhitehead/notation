@@ -1,110 +1,130 @@
 # Projection
 
-This document defines the projection stage after the harmony stage. It takes canonical input together with harmonic structure and emits a unified, render-ready projection in visible pitch-space.
+This document defines the projection stage. Projection combines canonical authored input with harmonic structure and emits a unified render-ready musical representation in visible pitch-space. It is the bridge between analysis-native musical structure and visual realization.
 
 ## Inputs
 
-This stage consumes two inputs:
+Projection consumes two inputs:
 
-- canonical input
+- canonical authored input
 - harmonic structure
 
-`docs/harmony.md` is authoritative for the harmony-stage contract. This document only defines projection.
+`docs/harmony.md` defines the harmony-stage contract consumed here.
 
-## Principles
+Projection keeps authored events and derived harmonic structure together, chooses visible pitch-space placement, preserves shared temporal structure, and emits one unified representation for rendering.
 
-The following aspects of projection appear stable in this repository:
+## Projection contract
 
-- projection remains distinct from both the harmony stage and rendering
-- harmonic structure and events stay together through projection
-- projection produces one projected result
-- durations, simultaneous events, and rests survive through projection
-- projection owns the musical pitch-space placement needed for rendering
-- carried harmonic structure remains analysis-native while projected placement becomes pitch-space-native
+Projection emits `Projection`.
 
-Projection takes analysis-native harmonic structure from the harmony stage and turns it into visible pitch-space structure. Rendering is the next stage after projection and is responsible only for visual realization.
-
-## Contract
-
-Projection combines canonical input with harmonic structure into the render-ready result.
-
-In the current code, that shape is `Projection`, which currently contains:
+`Projection` contains:
 
 - `minPitch` and `maxPitch` for the visible pitch range
-- ordered segments
-- for each segment: preserved `events`, ordered `timePositions`, `segmentWidthUnits`, `totalDuration`, segment-level visible defaults, and render-ready `harmonicSlices`
+- ordered projected segments
 
-Segment-level visible defaults currently contain:
+Each projected segment contains:
+
+- preserved `events`
+- ordered `timePositions`
+- `segmentWidthUnits`
+- `totalDuration`
+- optional `timeSignature`
+- optional `globalHighlightPitch`
+- segment-level visible defaults
+- projected `harmonicSlices`
+
+Segment-level visible defaults include:
 
 - a rest anchor
 
-`harmonicSlices` currently contains one or more variable-length projected harmonic slices per segment. Each slice currently contains:
+Projected `harmonicSlices` contain one or more segment-local projected harmonic slices. Each slice carries:
 
 - `startOffset`
 - `duration`
-- carried slice-local harmonic structure with `field`, `center`, and optional `grounding`
+- `startX`
+- `endX`
+- `touchesSegmentStart`
+- `touchesSegmentEnd`
+- the slice-local harmonic structure with `field`, `center`, and optional `grounding`
 - projected `field` region span objects
 - projected `center` region span objects
 - optional projected grounding overlay data for projected `root` and `ground` marks
 
-Projection derives those render-ready slices from the `harmonicSlices` already carried by harmony-stage output and preserves that slice timing when converting the analysis into segment-local x extents.
+Projection derives those slices from the `harmonicSlices` produced by harmony and preserves that slice timing when converting analysis into segment-local horizontal extent.
 
-Harmony-stage `HarmonicSlice` currently contains:
+Projected events carry:
 
-- `startOffset`
-- `duration`
-- `harmonic`
+- resolved `layer`
+- preserved offset and duration timing
+- a segment-local x-position derived from projection-owned time-position spacing
+- explicit projected pitch ownership data for pitched events
 
-Projected events currently also carry their resolved `layer`, preserved offset and duration timing, and a segment-local x-position derived from projection-owned time-position spacing. Ordered `timePositions` expose the shared onset structure that spacing is built from, and `segmentWidthUnits` carries the segment-level width demand derived from that spacing in projection-local layout units. Harmonic slices use segment-local timing together with those shared time positions to determine render-time horizontal extent inside the segment.
+Ordered `timePositions` expose the shared onset structure that spacing is built from. `segmentWidthUnits` carries the segment-level width demand derived from that timing structure in projection-local layout units.
 
-For pitched events, projection also carries explicit field-span ownership for each projected pitch. That ownership is resolved against the projected slice-local field spans and stored as plain owned span bounds, so rendering does not need to infer notehead attachment from slice timing and pitch content a second time. In the current implementation, a pitch only counts as owned when it lies on the projected span's actual tone-step lattice rather than merely falling inside the span's numeric pitch range.
+`globalHighlightPitch`, when present, is a piece-level projected emphasis pitch repeated on projected segments for downstream rendering use.
 
-Each projected harmonic region currently contains:
+`timeSignature`, when present, is carried forward from canonical authored input for downstream rendering and rhythmic grouping.
 
-- ordered projected spans in visible pitch-space
-- optional rightward `join` metadata on each projected span when projection determines an adjacent continuation
+## Projection principles
 
-Projected spans are render-facing geometry objects. In the current implementation they may extend beyond the nominal visible window because projection repeats whole spans rather than clipping spans partway through.
+Projection follows these principles:
 
-## Responsibilities
+- projection remains distinct from both harmony and rendering
+- harmonic structure and authored events stay together through projection
+- durations, simultaneity, rests, and layer identity survive through projection
+- projection owns visible pitch-space placement needed by rendering
+- projection carries analysis-native harmonic structure forward while converting placement into render-facing pitch-space terms
+- ownership and attachment decisions that rendering should not rediscover are made explicit in projection
 
-Projection is responsible for:
+## Time structure
 
-- preserving authored durations
-- preserving explicit offsets when present
-- inferring local offsets when they are not authored explicitly
-- preserving simultaneity
-- preserving rests
-- carrying slice-local harmonic structure forward from harmony-stage output
-- choosing render-ready pitch-space placements for harmonic spans and marks
-- assigning explicit projected field-span ownership for pitched events
-- choosing stable segment-level visible defaults for sparse material
-- determining the visible pitch range used for rendering
+Projection owns shared segment-local time structure for rendering.
 
-Projection turns canonical input plus harmonic structure into the render-ready result. It is not rendering.
+It:
 
-## Current implementation
+- preserves explicit offsets when they are authored
+- infers local offsets when they are not authored explicitly
+- derives ordered shared time positions from event timing
+- derives segment-level width demand from those shared time positions
+- uses slice timing together with shared time positions to determine horizontal extent within the segment
 
-This section describes the current projection implementation. It is an implementation note, not a permanent architectural guarantee.
+Projection therefore turns authored and inferred timing into a stable layout-facing musical time model without becoming a renderer.
 
-In the current implementation, projection:
+## Pitch-space and harmonic placement
 
-1. derives a visible pitch range from events
-2. computes event offsets layer by layer when offsets are not explicitly authored
-3. preserves durations, layer identity, and simultaneous events in the resulting events
-4. derives ordered shared time positions from event offsets inside each segment
-5. computes simple segment-local x-positions for projected events from those shared time positions
-6. derives a simple segment width from time-position spacing demand
-7. chooses one shared visible window for the piece and a local rest anchor per segment
-8. consumes harmony-stage segment-local harmonic slice analysis, including canonical harmonic lane spans
-9. repeats those harmonic spans as whole spans across the visible window rather than clipping spans partway through
-10. preserves projected harmonic spans as render-facing span objects, including degenerate zero-height spans
-11. resolves adjacent-span joins inside projection and attaches rightward join metadata directly to projected spans
-12. allows those joins to extend beyond the nominal visible window when a full-span continuation falls just above or below it
-13. derives projected `root` and `ground` marks from `grounding` within the segment's projected harmonic span extent when grounding is present
-14. emits one or more variable-length `harmonicSlices` per segment from harmony-stage `HarmonicSlice` analysis, with one full-segment slice when no stronger local split is warranted
-15. carries forward slice-local harmonic field, slice-local harmonic center, and optional grounding
-16. assigns explicit owning field spans to pitched event notes from those projected harmonic slices, only when the projected pitch lies on the owning span's tone-step lattice
-17. emits projection as the unified structure consumed by the renderer
+Projection owns visible pitch-space placement.
 
-In the current implementation, projection does not decide harmonic slice boundaries or baseline harmonic region shape itself. It consumes harmony-stage `HarmonicSlice` analysis, converts slice timing into segment-local x extents, repeats harmony-stage harmonic span classes into visible pitch-space, attaches rightward join metadata to projected spans, and assigns projected event ownership against those already-projected harmonic spans.
+It:
+
+- determines the visible pitch range used for rendering
+- chooses render-ready pitch-space placements for harmonic spans and marks
+- carries forward slice-local harmonic structure from harmony-stage output
+- converts harmony-stage harmonic regions into projected span objects in visible pitch-space
+- preserves projected joins between adjacent spans where harmonic continuation should remain explicit
+
+Projected spans are render-facing geometry objects. They are the pitch-space realization of analysis-native harmonic regions, not new harmonic inferences.
+
+Projection also owns several stable defaulting policies used by downstream rendering:
+
+- one visible pitch window for the projected piece, with fallback defaults when material is sparse
+- segment- and layer-local rest anchors derived from projected pitch material
+- minimum vertical separation between rest anchors in different layers
+- one optional piece-level projected emphasis pitch carried as `globalHighlightPitch`
+
+## Ownership and attachment
+
+Projection makes note-to-harmony ownership explicit.
+
+For pitched events, projection carries explicit field-span ownership for each projected pitch. That ownership is resolved against projected slice-local field spans and stored directly on the projected event so rendering does not need to infer note attachment from timing and pitch content a second time.
+
+This explicit ownership contract is part of projection’s architectural role: it is where analysis and event structure are unified into render-ready musical relationships.
+
+## Stage boundary
+
+Projection preserves authored durations, preserves or infers event offsets, preserves simultaneity, rests, and layers, carries slice-local harmonic structure forward from harmony, carries piece-level projected emphasis data needed by rendering, chooses stable segment-level visible defaults for sparse material, and emits one unified render-ready representation for rendering.
+
+Projection does not derive harmonic structure from authored input, redefine harmonic slice boundaries already established by harmony, or turn projected structures directly into screen geometry. Renderer-specific drawing, styling, and paint-order decisions remain downstream.
+
+Projection is therefore the last musical representation in the pipeline before visual realization. In code, that representation is `Projection`.
+
+Future downstream work may introduce richer graphic or layout-side representations without changing that role or blurring the harmony, projection, and rendering boundaries.

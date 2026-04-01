@@ -1,55 +1,76 @@
 # Render
 
-This document defines the rendering stage after projection. It takes a completed projection and renders it into the current visual output.
+This document defines the rendering stage. Rendering takes a completed projection and turns it into visible output.
 
-## Input
+## Inputs
 
-This stage consumes one input:
+Rendering consumes one input:
 
 - projection
 
-`docs/projection.md` is authoritative for the projection contract. This document only defines rendering.
+`docs/projection.md` defines the projection contract consumed here.
 
-## Principles
+Rendering consumes one unified projection, turns that projection into graphic objects and positioned graphic objects, and emits visible output. It may choose notation style, screen geometry, and visual emphasis, but it does not redefine harmonic structure, pitch-space placement, ownership, or shared time structure already established upstream.
 
-The following aspects of rendering appear stable in this repository:
+## Rendering principles
 
-- rendering remains distinct from both the harmony stage and projection
+Rendering follows these principles:
+
+- rendering remains distinct from both harmony and projection
 - rendering consumes one unified projection rather than separate musical diagrams
 - rendering is responsible for visual realization, not musical inference
-- rendering may vary widely in style while still showing the same projection
-- rendering SHOULD build intermediate graphic objects and positioned graphic objects before emitting output
+- rendering may vary in style while still showing the same projection
+- rendering builds graphic objects and positioned graphic objects before emitting output
+- drawing happens after layout decisions are established
+- paint order is explicit
 
-Rendering takes a completed projection and turns it into visible output. Unlike projection, it does not choose musical pitch-space placement.
+## Graphic and positioned graphic orientation
 
-## Responsibilities
+Within rendering, the architectural direction is:
 
-Rendering is responsible for:
+`projection -> graphic objects -> positioned graphic objects -> output`
 
-- drawing harmonic structure and events as one object
-- turning projection into screen geometry
-- making duration, silence, and harmonic orientation legible
-- choosing a visible notation language without changing projection
+That means:
 
-Rendering is the final stage. It is not the harmony stage. It is not projection.
+- projection-provided musical structure is turned into graphic objects suitable for layout
+- layout turns those graphic objects into positioned graphic objects
+- output emission turns positioned graphic objects into a concrete format such as SVG
 
-## Current implementation
+This separation keeps layout and drawing distinct and prevents guesswork in rendering from becoming part of the musical contract.
 
-This section describes the current rendering implementation. It is an implementation note, not a permanent architectural guarantee.
+## Layout
 
-The repository currently contains one renderer implementation, which emits a simple SVG score view.
+Rendering owns layout in screen space.
 
-In the current implementation, rendering:
+That includes:
 
-1. establishes notation and system layout from the projection pitch range, segment count, and projected segment widths
-2. builds region graphics from projected harmonic slices, including spans, notches, and grounding marks
-3. positions those region graphics into SVG-ready geometry and then emits them as SVG paths and rects
-4. draws a simple white seam between adjacent segments as a renderer-level visual divider
-5. builds event graphics from projected events, including pitched-event notehead geometry, explicit projected field-span ownership bounds, and rest glyph selection
-6. positions those event graphics, then emits noteheads, rests, stems, flags, dots, and beam groups
-7. renders projection-resolved joins from the rightward `join` metadata carried on each projected span, including joins that connect span bodies across slice and segment boundaries
-8. derives harmonic hue from one shared 24-step fifth-color wheel with a matched dark companion palette
-9. assembles each system through a focused render-system helper that owns paint-order group setup, region/event emission, and segment seams
-10. emits a simple SVG score view through `renderNotationSvg(...)`
+- system layout
+- segment placement within systems
+- final horizontal and vertical geometry in output units
+- paint-order grouping
+- final placement of graphics derived from projected slices and projected events
 
-In the current implementation, octave-range repetition, whole-span expansion, join determination, grounding-mark placement, harmonic-slice timing, explicit note-to-field-span ownership, basic event x-position spacing demand, and segment width demand are projection responsibilities. Rendering derives final slice-local screen spacing from the projected event timing structure, then turns those pitch-space decisions into screen geometry and visual legibility. Harmonic color, join geometry, and the segment seam are renderer-level styling derived from projected pitch and region content. Pitched notes that do not own a projected field span are rendered with a short ledger-line-style horizontal mark behind the white notehead fill.
+Rendering may derive layout-specific spacing and geometry from the projection timing structure, but those are realization decisions built on top of projection rather than replacements for projection.
+
+## Visual realization
+
+Rendering draws harmonic structure and events as one visual object.
+
+It:
+
+- turns projection into screen geometry
+- builds and positions region graphics from projected harmonic structure
+- builds and positions event graphics from projected events
+- makes duration, silence, harmonic orientation, and local ownership legible
+- chooses a visible notation language without changing projection
+- applies renderer-level styling such as paint order, seam treatment, and color policy
+- labels projected segments with bar numbers
+- emits the final output format
+
+Rendering does not derive harmonic structure from authored input, choose harmonic slice boundaries, choose visible pitch-space placement, decide projected span ownership for notes, or recompute musical relationships already made explicit in projection.
+
+## Output
+
+The repository may support multiple renderers over time, provided they consume the same projection contract.
+
+The existing renderer emits an SVG score view, including explicit layer paint order, segment seams, bar-number labels, and basic SVG accessibility metadata. SVG is an output choice rather than the architectural definition of rendering itself.
